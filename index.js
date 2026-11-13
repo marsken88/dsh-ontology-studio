@@ -31,12 +31,22 @@ export function apply(ctx, config = {}) {
 
   /* The panel is a separate process; it reads the same store over HTTP. */
   ctx.inject(['webServer'], (webCtx) => {
-    registerRoutes(webCtx, { store, prefix: ROUTE_PREFIX });
+    registerRoutes(webCtx, { store, prefix: ROUTE_PREFIX, readOnly: config.writeMode === 'readonly' });
   });
 
   const register = (definition) => {
     const add = () => ctx.tools.register(definition);
     ctx.effect(add);
+  };
+
+  /**
+   * Capability gate. `writeMode: 'readonly'` is not a UI switch: write tools are
+   * never registered, so no agent can call them and no approval workaround exists.
+   */
+  const writeMode = config.writeMode === 'readonly' ? 'readonly' : 'open';
+  const registerWrite = (definition) => {
+    if (writeMode === 'readonly') return;
+    register(definition);
   };
 
   /* ------------------------------------------------------------------ *
@@ -335,7 +345,7 @@ export function apply(ctx, config = {}) {
   /* ------------------------------------------------------------------ *
    * ontology_upsert_object  (write)
    * ------------------------------------------------------------------ */
-  register({
+  registerWrite({
     name: 'ontology_upsert_object',
     description:
       '新增或替换本体包里的一个对象定义。写入前会校验整个包：结构或跨引用不成立就直接拒绝，并在磁盘上保持原样。传 dryRun 只预览不落盘。改完建议再跑 ontology_validate 与 ontology_impact。',
@@ -425,7 +435,7 @@ export function apply(ctx, config = {}) {
   /* ------------------------------------------------------------------ *
    * ontology_publish  (write)
    * ------------------------------------------------------------------ */
-  register({
+  registerWrite({
     name: 'ontology_publish',
     description:
       '发布一个本体包：校验必须全部通过，然后按 bump 递增版本号并把状态置为 published。校验失败则拒绝发布，磁盘保持原样。',
@@ -477,6 +487,264 @@ export function apply(ctx, config = {}) {
       ir.status = 'published';
       const saved = await store.save(entry.file, ir);
       return { ok: saved.ok, from, to, file: saved.file, problems: saved.problems };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_upsert_link  (write)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_upsert_link',
+    description:
+      '新增或替换一条对象关系。两端对象必须已存在，写入前校验整包；不成立就拒绝且磁盘保持原样。传 dryRun 只预览。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        link: {
+          type: 'object',
+          description: '关系定义，需含 id、source、target、type；可含 cardinality',
+        },
+        dryRun: { type: 'boolean' },
+      },
+      required: ['packageId', 'link'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          action: { type: 'string' },
+          linkId: { type: 'string' },
+          version: { type: 'string' },
+          file: { type: 'string' },
+          problems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok) return text(`${v.action === 'created' ? '已新增' : '已更新'}关系 ${v.linkId}（v${v.version}）→ ${v.file}`);
+        return text(
+          lines([
+            `未写入：${v.message || '校验未通过'}（磁盘保持原样）`,
+            ...(v.problems || []).map((p) => `  [${p.code}] ${p.path} — ${p.message}`),
+          ])
+        );
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      if (args.link === null || typeof args.link !== 'object' || Array.isArray(args.link)) {
+        return { ok: false, message: 'link 必须是一个关系定义' };
+      }
+      const ir = JSON.parse(JSON.stringify(entry.ir));
+      const links = Array.isArray(ir.links) ? ir.links : (ir.links = []);
+      const index = links.findIndex((l) => l.id === args.link.id);
+      const action = index >= 0 ? 'updated' : 'created';
+      if (index >= 0) links[index] = args.link;
+      else links.push(args.link);
+
+      const check = validateIr(ir);
+      if (!check.ok) {
+        return { ok: false, action, linkId: args.link.id, version: ir.version, problems: check.problems, message: '写入会让本体包失效' };
+      }
+      if (args.dryRun) return { ok: true, action, linkId: args.link.id, version: ir.version, message: 'dryRun：校验通过，未写盘' };
+      const saved = await store.save(entry.file, ir);
+      return { ok: saved.ok, action, linkId: args.link.id, version: ir.version, file: saved.file, problems: saved.problems };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_delete_link  (write)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_delete_link',
+    description: '删除一条对象关系。关系删掉不会波及对象与动作，仍会校验整包后写入。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        linkId: { type: 'string' },
+        dryRun: { type: 'boolean' },
+      },
+      required: ['packageId', 'linkId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          linkId: { type: 'string' },
+          file: { type: 'string' },
+          problems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok) return text(`已删除关系 ${v.linkId} → ${v.file || '（dryRun 未写盘）'}`);
+        return text(`未删除：${v.message || '校验未通过'}`);
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      const ir = JSON.parse(JSON.stringify(entry.ir));
+      const links = Array.isArray(ir.links) ? ir.links : [];
+      if (!links.some((l) => l.id === args.linkId)) {
+        return { ok: false, message: `关系不存在：${args.linkId}。可用关系：${links.map((l) => l.id).join(', ') || '无'}` };
+      }
+      ir.links = links.filter((l) => l.id !== args.linkId);
+      const check = validateIr(ir);
+      if (!check.ok) return { ok: false, linkId: args.linkId, problems: check.problems, message: '删除会让本体包失效' };
+      if (args.dryRun) return { ok: true, linkId: args.linkId, message: 'dryRun：未写盘' };
+      const saved = await store.save(entry.file, ir);
+      return { ok: saved.ok, linkId: args.linkId, file: saved.file, problems: saved.problems };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_delete_object  (write)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_delete_object',
+    description:
+      '删除一个对象。它若被关系、动作或策略引用，默认拒绝并列出全部依赖；传 cascade 才会连带清理：删除相关关系、把它从动作的 writes 里摘掉（动作不再写任何对象则一并删除）、并清理指向被删动作的策略。删除前校验整包，不通过就拒绝且磁盘保持原样。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        objectId: { type: 'string' },
+        cascade: { type: 'boolean', description: 'true 时连带清理依赖，默认 false 只做检查' },
+        dryRun: { type: 'boolean' },
+      },
+      required: ['packageId', 'objectId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          blocked: { type: 'boolean' },
+          objectId: { type: 'string' },
+          links: { type: 'array' },
+          actions: { type: 'array' },
+          policies: { type: 'array' },
+          version: { type: 'string' },
+          file: { type: 'string' },
+          problems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.blocked) {
+          return text(
+            lines([
+              `拒绝删除 ${v.objectId}：还有 ${(v.links || []).length} 条关系、${(v.actions || []).length} 个动作、${(v.policies || []).length} 条策略引用它`,
+              ...(v.links || []).map((l) => `  关系 ${l.id}`),
+              ...(v.actions || []).map((a) => `  动作 ${a.id}`),
+              ...(v.policies || []).map((p) => `  策略 ${p.id}`),
+              '确认要连带清理请传 cascade: true',
+            ])
+          );
+        }
+        if (v.ok) {
+          return text(
+            `已删除 ${v.objectId}${v.cascaded ? '，连带清理 ' + v.cascaded.links + ' 条关系 / ' + v.cascaded.actions + ' 个动作 / ' + v.cascaded.policies + ' 条策略' : ''} → ${v.file || '（dryRun 未写盘）'}`
+          );
+        }
+        return text(
+          lines([
+            `未删除：${v.message || '校验未通过'}`,
+            ...(v.problems || []).map((p) => `  [${p.code}] ${p.path} — ${p.message}`),
+          ])
+        );
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      const ir = JSON.parse(JSON.stringify(entry.ir));
+      const objects = Array.isArray(ir.objects) ? ir.objects : [];
+      if (!objects.some((o) => o.id === args.objectId)) {
+        return {
+          ok: false,
+          objectId: args.objectId,
+          message: `对象不存在：${args.objectId}。可用对象：${objects.map((o) => o.id).join(', ')}`,
+        };
+      }
+
+      const links = (ir.links || []).filter((l) => l.source === args.objectId || l.target === args.objectId);
+      const actions = (ir.actions || []).filter((a) => (a.writes || []).includes(args.objectId));
+      const actionIds = actions.map((a) => a.id);
+      const policies = (ir.policies || []).filter((p) => (p.appliesTo || []).some((a) => actionIds.includes(a)));
+
+      if ((links.length || actions.length) && !args.cascade) {
+        return {
+          ok: false,
+          blocked: true,
+          objectId: args.objectId,
+          links: links.map((l) => ({ id: l.id, source: l.source, target: l.target })),
+          actions: actions.map((a) => ({ id: a.id })),
+          policies: policies.map((p) => ({ id: p.id })),
+          message: '对象仍被引用，需 cascade 才能删除',
+        };
+      }
+
+      ir.objects = objects.filter((o) => o.id !== args.objectId);
+      ir.links = (ir.links || []).filter((l) => l.source !== args.objectId && l.target !== args.objectId);
+
+      const droppedActions = [];
+      ir.actions = (ir.actions || [])
+        .map((a) => {
+          if (!(a.writes || []).includes(args.objectId)) return a;
+          const writes = a.writes.filter((w) => w !== args.objectId);
+          if (writes.length === 0) {
+            droppedActions.push(a.id);
+            return null;
+          }
+          return Object.assign({}, a, { writes });
+        })
+        .filter(Boolean);
+
+      const trimmedPolicies = [];
+      ir.policies = (ir.policies || [])
+        .map((p) => {
+          if (!Array.isArray(p.appliesTo)) return p;
+          const appliesTo = p.appliesTo.filter((a) => droppedActions.indexOf(a) < 0);
+          if (appliesTo.length === p.appliesTo.length) return p;
+          trimmedPolicies.push(p.id);
+          return Object.assign({}, p, { appliesTo });
+        })
+        .filter((p) => !Array.isArray(p.appliesTo) || p.appliesTo.length > 0);
+
+      const check = validateIr(ir);
+      if (!check.ok) {
+        return { ok: false, objectId: args.objectId, version: ir.version, problems: check.problems, message: '删除会让本体包失效' };
+      }
+      const cascaded = {
+        links: links.length,
+        actions: droppedActions.length,
+        policies: trimmedPolicies.length,
+      };
+      if (args.dryRun) {
+        return { ok: true, objectId: args.objectId, version: ir.version, cascaded, message: 'dryRun：未写盘' };
+      }
+      const saved = await store.save(entry.file, ir);
+      return {
+        ok: saved.ok,
+        objectId: args.objectId,
+        version: ir.version,
+        cascaded,
+        file: saved.file,
+        problems: saved.problems,
+      };
     },
   });
 }

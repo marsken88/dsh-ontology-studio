@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.3
+## 当前状态：v0.4
 
 | 部分 | 状态 |
 | --- | --- |
@@ -14,10 +14,11 @@
 | 统一本体 IR + 正式 JSON Schema | ✅ `assets/ontology-ir.schema.json` |
 | IR 校验器（结构 + 跨引用 + 影响分析） | ✅ `lib/ir.mjs` |
 | 只读资产仓库（目录即数据源） | ✅ `lib/store.mjs` |
-| **写入路径**：新增/替换对象、版本递增、发布 | ✅ 校验门禁，失败即拒绝且不落盘 |
-| **面板 ↔ 宿主联通** | ✅ 面板读真实资产，断线自动回落到演示数据 |
-| Agent 工具 `ontology_*` | ✅ 六个，其中两个写工具 |
-| 权限模型 / 审批闸门的真实执行 | ❌ 未开始 |
+| 模型编辑：对象、关系的增改删 | ✅ 五个写工具，校验门禁 + 级联策略 |
+| 版本递增与发布状态机 | ✅ `ontology_publish` |
+| 面板 ↔ 宿主联通 | ✅ 面板读真实资产，断线自动回落到演示数据 |
+| 能力门禁（只读模式） | ✅ `writeMode: readonly` 直接不注册写工具 |
+| 审批闸门的逐次交互 | ❌ 未开始（策略目前只是元数据） |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -60,8 +61,13 @@
 | `ontology_get` | 读 | 读一个包；带 `objectId` 时返回该对象的属性、关系、相关规则与动作 |
 | `ontology_validate` | 读 | 校验结构与跨引用，返回带路径的问题列表 |
 | `ontology_impact` | 读 | 对象影响分析：下游关系、规则、动作、审批策略 |
-| `ontology_upsert_object` | **写** | 新增或替换一个对象定义；写入前校验整包，不成立就拒绝且磁盘保持原样；支持 `dryRun` |
-| `ontology_publish` | **写** | 校验必须全通过，按 `patch`/`minor`/`major` 递增版本并置为 `published` |
+| `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
+| `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
+| `ontology_delete_link` | **写** | 删除一条关系 |
+| `ontology_delete_object` | **写** | 删除对象；被引用时默认拒绝，`cascade` 才连带清理 |
+| `ontology_publish` | **写** | 校验全通过后按 `patch`/`minor`/`major` 递增版本并置为 `published` |
+
+所有写工具都遵循同一条不变量：**先构造「写完之后」的整包再校验，不通过就什么都不写**；都支持 `dryRun` 预览。
 
 `ontology_get('retail.store-inventory', 'Inventory')` 的实际渲染输出：
 
@@ -79,6 +85,31 @@
 
 写入的安全边界：**校验不过就不写**。`ontology_upsert_object` 会先构造出「写完之后」的整包再校验——包括跨引用——通过才落盘；`ontology_publish` 在包无效时同样拒绝，并把磁盘原样保留。
 
+删除是唯一有级联风险的写操作，所以它默认**拒绝**：
+
+```
+delete Inventory            → blocked：还有 2 条关系、3 个动作、1 条策略引用它
+delete Inventory --cascade  → 删除对象 + 相关关系 + 只写它的动作
+                              （动作还写别的对象则保留并从 writes 里摘掉它）
+                              + 清理指向被删动作的策略
+```
+
+级联之后仍会整包校验，确保不留下悬空引用。
+
+### 能力门禁：只读模式
+
+在 profile 的 `cordis.patch.yml` 里给这一行加配置，写工具就**不会被注册**——不是禁用按钮，是 Agent 根本看不到这些工具：
+
+```yaml
+- id: dsh-ontology-studio
+  name: dsh-ontology-studio
+  config:
+    writeMode: readonly        # 默认 open
+    assetsDir: E:/path/to/assets
+```
+
+面板顶栏会显示「只读模式」，`/status` 也会返回 `readOnly: true`。
+
 ### HTTP API（面板用）
 
 | 路由 | 返回 |
@@ -92,15 +123,15 @@
 ## 测试
 
 ```bash
-npm test        # 五组，共 59 项断言
+npm test        # 五组，共 71 项断言
 ```
 
 | 文件 | 覆盖 |
 | --- | --- |
 | `test/ir.test.cjs` | 23 项：Schema 语义、每类错误各一条、影响分析、仓库读目录 |
-| `test/tools.test.cjs` | 13 项：激活、`ctx.effect` 挂载、六个工具端到端、目录缺失降级 |
-| `test/write.test.cjs` | 12 项：新增/替换对象、校验失败不落盘、`dryRun`、版本递增、发布拒绝 |
-| `test/api.test.cjs` | 11 项：三条路由、400/404/405/500、目录缺失 |
+| `test/tools.test.cjs` | 14 项：激活、`ctx.effect` 挂载、九个工具端到端、只读模式不注册写工具、目录缺失降级 |
+| `test/write.test.cjs` | 22 项：对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
+| `test/api.test.cjs` | 12 项：三条路由、400/404/405/500、只读标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
 
 写路径的测试全部在临时目录里跑，**不会改动仓库里的 `assets/`**。
@@ -150,8 +181,9 @@ dsh-ontology-studio/
 - [x] 读取 API（Agent 工具 + HTTP）
 - [x] 写入路径：对象新增/替换、校验门禁、版本递增、发布状态
 - [x] 面板消费宿主真实资产
-- [ ] 删除对象与关系维护（会波及引用，需要级联策略）
-- [ ] 权限模型与审批闸门的真实执行
+- [x] 删除对象与关系维护（级联策略 + 整包校验）
+- [x] 能力门禁：只读模式下写工具不注册
+- [ ] 逐次审批闸门（写操作前向用户确认）
 
 **阶段二 · Harness 执行闭环**
 - [x] Agent 能直接读本体（`ontology_*`）
@@ -179,8 +211,8 @@ dsh-ontology-studio/
 
 ## 已知边界
 
-- **无权限校验**：任何能调工具的 Agent 都能写资产目录；审批标记目前只是元数据。
+- **门禁是全局开关，不是逐次审批**：`writeMode: readonly` 能整体关掉写能力，但 `open` 模式下没有「这一次写操作要不要批准」的交互确认；本体里的 `approvalRequired` 目前仍是元数据，拦截不了任何真实调用。
 - **无并发控制**：两个写入同时发生时后者覆盖前者，尚无 etag / 乐观锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
 - **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
-- **无删除路径**：删对象会牵动关系与动作，留给下一阶段做级联策略。
+- **规则与函数不执行**：规则表达式只做引用匹配（影响分析），没有求值引擎，也没有动作执行器。

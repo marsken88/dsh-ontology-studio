@@ -84,6 +84,7 @@ async function call(route, url, method = 'GET') {
     assert.equal(res.headers['content-type'], 'application/json; charset=utf-8');
     const body = res.json();
     assert.equal(body.ok, true);
+    assert.equal(body.value.readOnly, false, '默认不是只读模式');
     assert.equal(body.value.packages.length, 1);
     const pkg = body.value.packages[0];
     assert.equal(pkg.id, 'retail.store-inventory');
@@ -148,6 +149,13 @@ async function call(route, url, method = 'GET') {
     const res = await call(routes[0], `${PREFIX}/whatever`);
     assert.equal(res.statusCode, 404);
     assert.equal(res.json().error, 'unknown_route');
+  });
+
+  await it('readOnly 选项透出到 /status', async () => {
+    const alt = register(ROOT);
+    registerRoutes(alt.ctx, { store, prefix: PREFIX, readOnly: true });
+    const res = await call(alt.routes[0], `${PREFIX}/status`);
+    assert.equal(res.json().value.readOnly, true);
   });
 
   await it('资产目录不存在时 status 仍返回 200 并标记 missingDir', async () => {

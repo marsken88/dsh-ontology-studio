@@ -791,6 +791,7 @@ window.__ModuleLoader__.load({
           phase: state.phase,
           live: true,
           label: '实时资产',
+          readOnly: state.value ? state.value.readOnly === true : false,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -805,6 +806,7 @@ window.__ModuleLoader__.load({
         phase: state.phase,
         live: false,
         label: state.phase === 'offline' ? '演示数据 · 服务未连接' : '演示数据',
+        readOnly: false,
         dir: null,
         file: null,
         problems: [],
@@ -1591,6 +1593,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'os-head-t' }, h('h1', { className: 'os-title' }, meta[0]), h('div', { className: 'os-desc' }, meta[1])),
             pkgBadge,
             h(Badge, { tone: model.live ? 'on' : 'warn' }, model.label),
+            model.readOnly ? h(Badge, { tone: 'warn' }, '只读模式') : null,
             model.problems.length ? h(Badge, { tone: 'err' }, model.problems.length + ' 个校验问题') : null,
             h('button', { type: 'button', className: 'os-btn', disabled: true }, '切换环境：生产'),
             h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产')

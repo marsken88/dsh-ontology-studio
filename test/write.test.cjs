@@ -248,8 +248,172 @@ function readPackage(dir) {
     assert.equal(afterText, beforeText);
   });
 
-  console.log('\nstore.save');
+  console.log('\nontology_upsert_link');
 
+  await it('新增关系后落盘并通过校验', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const link = { id: 'order_belongs_to_store', source: 'Order', target: 'Store', type: 'placedAt', cardinality: 'n:1' };
+    const result = await tools.ontology_upsert_link.execute({ packageId: 'retail.store-inventory', link }, {});
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    assert.equal(result.action, 'created');
+    const saved = readPackage(dir);
+    assert.equal(saved.links.length, 6);
+    const validated = await tools.ontology_validate.execute({}, {});
+    assert.equal(validated.ok, true, JSON.stringify(validated.problems));
+  });
+
+  await it('关系端点不存在时拒绝且磁盘不变', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const beforeText = fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8');
+    const result = await tools.ontology_upsert_link.execute(
+      { packageId: 'retail.store-inventory', link: { id: 'bad_link', source: 'Ghost', target: 'Store', type: 'x' } },
+      {}
+    );
+    assert.equal(result.ok, false);
+    assert.ok(result.problems.some((p) => p.code === 'dangling-endpoint'), JSON.stringify(result.problems));
+    assert.equal(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'), beforeText);
+  });
+
+  await it('替换已有关系（updated）', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const before = readPackage(dir);
+    const link = JSON.parse(JSON.stringify(before.links[0]));
+    link.cardinality = '1:1';
+    const result = await tools.ontology_upsert_link.execute({ packageId: 'retail.store-inventory', link }, {});
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    assert.equal(result.action, 'updated');
+    const after = readPackage(dir);
+    assert.equal(after.links.length, before.links.length);
+    assert.equal(after.links.find((l) => l.id === link.id).cardinality, '1:1');
+  });
+
+  console.log('\nontology_delete_link');
+
+  await it('删除关系后落盘并通过校验', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const result = await tools.ontology_delete_link.execute(
+      { packageId: 'retail.store-inventory', linkId: 'member_shops_at_store' },
+      {}
+    );
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    const saved = readPackage(dir);
+    assert.equal(saved.links.length, 4);
+    assert.ok(!saved.links.some((l) => l.id === 'member_shops_at_store'));
+    const validated = await tools.ontology_validate.execute({}, {});
+    assert.equal(validated.ok, true);
+  });
+
+  await it('关系不存在时报错并列出可用关系', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const result = await tools.ontology_delete_link.execute(
+      { packageId: 'retail.store-inventory', linkId: 'ghost_link' },
+      {}
+    );
+    assert.equal(result.ok, false);
+    assert.ok(result.message.includes('inventory_belongs_to_store'));
+  });
+
+  console.log('\nontology_delete_object');
+
+  await it('对象仍被引用时默认拒绝，并列出全部依赖', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const beforeText = fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8');
+    const result = await tools.ontology_delete_object.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Inventory' },
+      {}
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.blocked, true);
+    assert.equal(result.links.length, 2);
+    assert.equal(result.actions.length, 3);
+    assert.ok(result.policies.length >= 1);
+    assert.equal(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'), beforeText, '拒绝时不得写盘');
+    const rendered = tools.ontology_delete_object.output.render({}, result);
+    assert.ok(rendered[0].text.includes('cascade: true'));
+  });
+
+  await it('cascade 删除对象并连带清理关系、动作、策略', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const before = readPackage(dir);
+    const result = await tools.ontology_delete_object.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Inventory', cascade: true },
+      {}
+    );
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    assert.equal(result.cascaded.links, 2);
+    const saved = readPackage(dir);
+    assert.equal(saved.objects.length, before.objects.length - 1);
+    assert.ok(!saved.objects.some((o) => o.id === 'Inventory'));
+    assert.equal(saved.links.length, before.links.length - 2);
+    assert.ok(!saved.links.some((l) => l.source === 'Inventory' || l.target === 'Inventory'));
+    // adjustInventory / startStocktake 只写 Inventory → 一并删除；createTransfer 还写 Order → 保留
+    assert.ok(!saved.actions.some((a) => a.id === 'adjustInventory'));
+    assert.ok(!saved.actions.some((a) => a.id === 'startStocktake'));
+    const transfer = saved.actions.find((a) => a.id === 'createTransfer');
+    assert.deepEqual(transfer.writes, ['Order']);
+    // 指向被删动作的策略被修剪，不留悬空引用
+    for (const policy of saved.policies) {
+      for (const target of policy.appliesTo || []) {
+        assert.ok(saved.actions.some((a) => a.id === target), `策略 ${policy.id} 悬空指向 ${target}`);
+      }
+    }
+    const validated = await tools.ontology_validate.execute({}, {});
+    assert.equal(validated.ok, true, JSON.stringify(validated.problems));
+  });
+
+  await it('cascade + dryRun 只预览不落盘', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const beforeText = fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8');
+    const result = await tools.ontology_delete_object.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Inventory', cascade: true, dryRun: true },
+      {}
+    );
+    assert.equal(result.ok, true);
+    assert.equal(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'), beforeText);
+  });
+
+  await it('未被引用的对象可直接删除', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    // 先加一个孤立的对象，再删掉
+    await tools.ontology_upsert_object.execute(
+      {
+        packageId: 'retail.store-inventory',
+        object: { id: 'Warehouse', name: '仓库', keys: ['warehouseId'], properties: [{ name: 'warehouseId', type: 'string', required: true }] },
+      },
+      {}
+    );
+    const result = await tools.ontology_delete_object.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Warehouse' },
+      {}
+    );
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    assert.equal(result.blocked, undefined);
+    const saved = readPackage(dir);
+    assert.ok(!saved.objects.some((o) => o.id === 'Warehouse'));
+    assert.equal(saved.objects.length, 6);
+  });
+
+  await it('对象不存在时报错并列出可用对象', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const result = await tools.ontology_delete_object.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Ghost' },
+      {}
+    );
+    assert.equal(result.ok, false);
+    assert.ok(result.message.includes('Inventory'));
+  });
+
+  console.log('\nstore.save');
   await it('save 拒绝无效 IR 且 force 可覆盖', async () => {
     const dir = tempAssets();
     const { createStore } = await import('../lib/store.mjs');
