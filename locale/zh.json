@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "本体工作台",
-    "description": "企业级语义建模与 Harness 智能执行平台：八个 Studio 统一导航，内置「门店—商品—库存」示例本体，并提供 ontology_list / ontology_get / ontology_validate / ontology_impact 四个 Agent 可调用工具。",
+    "description": "企业级语义建模与 Harness 智能执行平台：八个 Studio 统一导航，内置「门店—商品—库存」示例本体与示例数据，十个 Agent 可调用工具覆盖本体读写、校验、影响分析、规则求值与执行轨迹；写操作带只读门禁与人工审批闸门。",
     "detail": "docs/DETAIL.md"
   },
   "entry": {
