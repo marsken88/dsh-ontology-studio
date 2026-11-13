@@ -9,10 +9,14 @@
  */
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createStore } from './lib/store.mjs';
-import { impactOf, summarizeIr } from './lib/ir.mjs';
+import { createStore, bumpVersion } from './lib/store.mjs';
+import { impactOf, summarizeIr, validateIr } from './lib/ir.mjs';
+import { registerRoutes } from './lib/api.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/** Single source of the panel's HTTP namespace. */
+const ROUTE_PREFIX = '/dsh-ontology-studio';
 
 /** `tools` is a hard dependency: without it this plugin has nothing to offer. */
 export const inject = ['tools'];
@@ -24,6 +28,11 @@ const lines = (items) => items.filter(Boolean).join('\n');
 export function apply(ctx, config = {}) {
   const assetsDir = config.assetsDir ? path.resolve(config.assetsDir) : path.join(here, 'assets');
   const store = createStore({ dir: assetsDir });
+
+  /* The panel is a separate process; it reads the same store over HTTP. */
+  ctx.inject(['webServer'], (webCtx) => {
+    registerRoutes(webCtx, { store, prefix: ROUTE_PREFIX });
+  });
 
   const register = (definition) => {
     const add = () => ctx.tools.register(definition);
@@ -320,6 +329,154 @@ export function apply(ctx, config = {}) {
         };
       }
       return { found: true, ...impact };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_upsert_object  (write)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_upsert_object',
+    description:
+      '新增或替换本体包里的一个对象定义。写入前会校验整个包：结构或跨引用不成立就直接拒绝，并在磁盘上保持原样。传 dryRun 只预览不落盘。改完建议再跑 ontology_validate 与 ontology_impact。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '资产包 id' },
+        object: {
+          type: 'object',
+          description: '完整的对象定义，需包含 id、name、properties；可含 description、keys',
+        },
+        dryRun: { type: 'boolean', description: '只校验不写盘' },
+      },
+      required: ['packageId', 'object'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          action: { type: 'string' },
+          objectId: { type: 'string' },
+          version: { type: 'string' },
+          file: { type: 'string' },
+          problems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok) {
+          return text(
+            `${v.action === 'created' ? '已新增' : '已更新'}对象 ${v.objectId}（${v.packageId} v${v.version}）→ ${v.file}`
+          );
+        }
+        return text(
+          lines([
+            `未写入：${v.message || '校验未通过'}（磁盘保持原样）`,
+            ...(v.problems || []).map((p) => `  [${p.code}] ${p.path} — ${p.message}`),
+          ])
+        );
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) {
+        return { ok: false, message: `资产包不存在：${args.packageId}` };
+      }
+      if (args.object === null || typeof args.object !== 'object' || Array.isArray(args.object)) {
+        return { ok: false, message: 'object 必须是一个对象定义' };
+      }
+      const ir = JSON.parse(JSON.stringify(entry.ir));
+      const objects = Array.isArray(ir.objects) ? ir.objects : (ir.objects = []);
+      const index = objects.findIndex((o) => o.id === args.object.id);
+      const action = index >= 0 ? 'updated' : 'created';
+      if (index >= 0) objects[index] = args.object;
+      else objects.push(args.object);
+
+      const check = validateIr(ir);
+      if (!check.ok) {
+        return {
+          ok: false,
+          action,
+          objectId: args.object.id,
+          version: ir.version,
+          problems: check.problems,
+          message: '写入会让本体包失效',
+        };
+      }
+      if (args.dryRun) {
+        return { ok: true, action, objectId: args.object.id, version: ir.version, message: 'dryRun：校验通过，未写盘' };
+      }
+      const saved = await store.save(entry.file, ir);
+      return {
+        ok: saved.ok,
+        action,
+        objectId: args.object.id,
+        packageId: ir.id,
+        version: ir.version,
+        file: saved.file,
+        problems: saved.problems,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_publish  (write)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_publish',
+    description:
+      '发布一个本体包：校验必须全部通过，然后按 bump 递增版本号并把状态置为 published。校验失败则拒绝发布，磁盘保持原样。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        bump: { type: 'string', description: 'patch（默认）| minor | major' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          from: { type: 'string' },
+          to: { type: 'string' },
+          file: { type: 'string' },
+          problems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok) return text(`已发布：${v.from} → ${v.to}（${v.file}）`);
+        return text(
+          lines([
+            `未发布：${v.message || '校验未通过'}`,
+            ...(v.problems || []).map((p) => `  [${p.code}] ${p.path} — ${p.message}`),
+          ])
+        );
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) {
+        return { ok: false, message: `资产包不存在：${args.packageId}` };
+      }
+      const check = validateIr(entry.ir);
+      if (!check.ok) {
+        return { ok: false, from: entry.ir.version, problems: check.problems, message: '本体包未通过校验' };
+      }
+      const ir = JSON.parse(JSON.stringify(entry.ir));
+      const from = ir.version;
+      const to = bumpVersion(from, args.bump);
+      ir.version = to;
+      ir.status = 'published';
+      const saved = await store.save(entry.file, ir);
+      return { ok: saved.ok, from, to, file: saved.file, problems: saved.problems };
     },
   });
 }

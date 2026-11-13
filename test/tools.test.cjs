@@ -22,12 +22,20 @@ async function it(name, fn) {
   }
 }
 
-function fakeContext() {
+function fakeContext(options = {}) {
   const registered = [];
   const effects = [];
+  const routes = [];
+  const webServer = {
+    register(route) {
+      routes.push(route);
+      return () => {};
+    },
+  };
   return {
     registered,
     effects,
+    routes,
     ctx: {
       tools: {
         register(definition) {
@@ -43,6 +51,13 @@ function fakeContext() {
         effects.push(disposer);
         return disposer;
       },
+      /** Mirrors Cordis: the callback runs only when every dependency is present. */
+      inject(deps, callback) {
+        if (deps.includes('webServer') && options.webServer !== false) {
+          callback({ webServer });
+        }
+        return () => {};
+      },
     },
   };
 }
@@ -55,18 +70,20 @@ function fakeContext() {
   const { ctx, registered, effects } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets') };
 
-  await it('apply 不抛错并注册四个工具', () => {
+  await it('apply 不抛错并注册六个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_get',
       'ontology_impact',
       'ontology_list',
+      'ontology_publish',
+      'ontology_upsert_object',
       'ontology_validate',
     ]);
   });
 
   await it('每个注册都挂在 ctx.effect 上（可卸载）', () => {
-    assert.equal(effects.length, 4);
+    assert.equal(effects.length, 6);
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 

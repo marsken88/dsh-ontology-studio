@@ -12,8 +12,10 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const useState = React.useState;
     const useMemo = React.useMemo;
+    const useEffect = React.useEffect;
 
     const PANEL_ID = 'dsh-ontology-studio';
+    const API_BASE = '/dsh-ontology-studio';
 
     /* ------------------------------------------------------------------ *
      * styles — theme tokens only, so light/dark follow the host
@@ -672,26 +674,201 @@ window.__ModuleLoader__.load({
     ];
 
     /* ------------------------------------------------------------------ *
+     * live ontology (Host-owned assets, served over the plugin's own route)
+     * ------------------------------------------------------------------ */
+    const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
+
+    function useOntologyState() {
+      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null });
+      useEffect(function () {
+        let alive = true;
+        if (typeof fetch !== 'function') {
+          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch' });
+          return function () {};
+        }
+        fetch(API_BASE + '/status', { credentials: 'same-origin', headers: { accept: 'application/json' } })
+          .then(function (res) {
+            return res.ok ? res.json() : Promise.reject(new Error('status ' + res.status));
+          })
+          .then(function (body) {
+            if (!alive) return null;
+            const value = body && body.value;
+            const first = value && value.packages ? value.packages.filter((p) => p.ok)[0] : null;
+            if (!first) {
+              setState({ phase: 'empty', value: value, file: null, ir: null, error: null });
+              return null;
+            }
+            return fetch(API_BASE + '/package?id=' + encodeURIComponent(first.id), {
+              credentials: 'same-origin',
+              headers: { accept: 'application/json' },
+            })
+              .then(function (res) {
+                return res.ok ? res.json() : Promise.reject(new Error('package ' + res.status));
+              })
+              .then(function (pkg) {
+                if (!alive) return;
+                setState({ phase: 'live', value: value, file: pkg.value.file, ir: pkg.value.ir, error: null });
+              });
+          })
+          .catch(function (error) {
+            if (alive) setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message) });
+          });
+        return function () {
+          alive = false;
+        };
+      }, []);
+      return state;
+    }
+
+    /** Project one IR object onto the shape the pages render. */
+    function objectFromIr(obj, ir) {
+      const objects = ir.objects || [];
+      const nameOf = function (id) {
+        const hit = objects.filter(function (o) { return o.id === id; })[0];
+        return hit ? id + ' ' + hit.name : id;
+      };
+      const status = STATUS_TEXT[ir.status] || ir.status || '草稿';
+      const props = (obj.properties || []).map(function (p) {
+        return {
+          name: p.name,
+          label: p.label || p.name,
+          type: p.type,
+          required: p.required === true,
+          source: p.source,
+          note: p.description,
+          constraint: p.enum ? p.enum.join(' | ') : undefined,
+        };
+      });
+      const propNames = props.map(function (p) { return p.name; });
+      const links = (ir.links || [])
+        .filter(function (l) { return l.source === obj.id || l.target === obj.id; })
+        .map(function (l) {
+          const outbound = l.source === obj.id;
+          return [l.type, nameOf(outbound ? l.target : l.source), l.cardinality || '—', outbound ? '出向' : '入向'];
+        });
+      const actions = (ir.actions || [])
+        .filter(function (a) { return (a.writes || []).indexOf(obj.id) >= 0; })
+        .map(function (a) {
+          return [a.id, a.name, a.approvalRequired ? '需审批' : '免审批', '写 ' + (a.writes || []).join(', ')];
+        });
+      const rules = (ir.rules || []).filter(function (r) {
+        const expression = String(r.expression || '');
+        return propNames.some(function (name) {
+          return new RegExp('\\b' + name + '\\b').test(expression);
+        });
+      });
+      const actionIds = actions.map(function (a) { return a[0]; });
+      const policies = (ir.policies || []).filter(function (p) {
+        return (p.appliesTo || []).some(function (a) { return actionIds.indexOf(a) >= 0; });
+      });
+      const impact = []
+        .concat(links.map(function (l) { return ['关系', l[0] + ' → ' + l[1], l[3]]; }))
+        .concat(rules.map(function (r) { return ['业务规则', r.id, r.enabled === false ? '已停用' : r.severity]; }))
+        .concat(actions.map(function (a) { return ['业务动作', a[0], a[2]]; }))
+        .concat(policies.map(function (p) { return ['审批策略', p.id, p.effect]; }));
+      return {
+        id: obj.id,
+        name: obj.name,
+        desc: obj.description || '',
+        domain: ir.domain || '—',
+        owner: ir.owner || '—',
+        version: ir.version,
+        status: status,
+        table: null,
+        keys: obj.keys || [],
+        props: props,
+        links: links,
+        actions: actions,
+        impact: impact,
+      };
+    }
+
+    function buildModel(state) {
+      const live = state.phase === 'live' && state.ir;
+      if (live) {
+        const problems = state.value ? state.value.problems || [] : [];
+        return {
+          phase: state.phase,
+          live: true,
+          label: '实时资产',
+          dir: state.value ? state.value.dir : null,
+          file: state.file,
+          problems: problems,
+          pkg: state.ir,
+          objects: (state.ir.objects || []).map(function (o) { return objectFromIr(o, state.ir); }),
+          rules: (state.ir.rules || []).length,
+          links: (state.ir.links || []).length,
+          actions: (state.ir.actions || []).length,
+        };
+      }
+      return {
+        phase: state.phase,
+        live: false,
+        label: state.phase === 'offline' ? '演示数据 · 服务未连接' : '演示数据',
+        dir: null,
+        file: null,
+        problems: [],
+        pkg: null,
+        objects: OBJECTS,
+        rules: RULES.length,
+        links: 5,
+        actions: ACTIONS.length,
+      };
+    }
+
+    /* ------------------------------------------------------------------ *
      * pages
      * ------------------------------------------------------------------ */
-    function OverviewPage() {
+    function OverviewPage(props) {
+      const model = props.model || buildModel({ phase: 'demo' });
       const loop = [
         ['企业业务知识', '制度、流程、数据资产、接口、规则'],
         ['Ontology 语义建模', '对象、属性、关系、事件、规则、动作'],
         ['Harness 智能执行', '上下文、Skills、工具、Agent、权限、评测'],
         ['业务应用与自动化', '查询分析、决策、运营、流程自动化'],
       ];
+      const published = model.objects.filter(function (o) { return o.status === '已发布'; }).length;
       return h(
         'div',
         { className: 'os-grid' },
         h(
           'div',
           { className: 'os-grid os-g4' },
-          h(Stat, { value: '6', label: '本体对象', delta: '4 已发布 · 2 草稿' }),
-          h(Stat, { value: '4', label: '数据源', delta: '2 同步型 · 2 联邦型' }),
-          h(Stat, { value: '3', label: 'Agent', delta: '1 已发布 · 1 灰度' }),
-          h(Stat, { value: '18', label: '可复用资产', delta: '本月 +5' })
+          h(Stat, {
+            value: String(model.objects.length),
+            label: '本体对象',
+            delta: published + ' 已发布 · ' + (model.objects.length - published) + ' 草稿',
+          }),
+          h(Stat, { value: String(model.rules), label: '业务规则', delta: model.live ? '来自当前资产包' : '演示数据' }),
+          h(Stat, { value: String(model.actions), label: '业务动作', delta: model.live ? '含审批标记' : '演示数据' }),
+          h(Stat, { value: String(model.links), label: '对象关系', delta: model.live ? '资产包内声明' : '演示数据' })
         ),
+        model.live
+          ? h(
+              Card,
+              {
+                title: '资产校验',
+                sub: model.dir,
+                extra: h(Badge, { tone: model.problems.length ? 'err' : 'on' }, model.problems.length ? model.problems.length + ' 个问题' : '全部通过'),
+              },
+              model.problems.length
+                ? model.problems.slice(0, 8).map(function (p, i) {
+                    return h(
+                      'div',
+                      { key: i, className: 'os-row' },
+                      h(Badge, { tone: 'err' }, p.code),
+                      h('span', { className: 'os-grow os-mono' }, p.path),
+                      h('span', { className: 'os-muted' }, p.message)
+                    );
+                  })
+                : h(
+                    'div',
+                    { className: 'os-row' },
+                    h('span', { className: 'os-grow' }, model.file || '—'),
+                    h('span', { className: 'os-muted os-mono' }, '结构与跨引用均已通过')
+                  )
+            )
+          : null,
         h(
           Card,
           { title: '能力闭环', sub: '运行数据与人工反馈回流到资产沉淀' },
@@ -753,17 +930,21 @@ window.__ModuleLoader__.load({
         h(
           Notes,
           null,
-          '这一版是平台骨架：导航、信息架构、数据结构与交互路径已按规划文档落地，业务能力（本体解析、数据同步、Agent 执行、审批回写）尚未接入。'
+          model.live
+            ? '数据来自宿主正在读取的本体资产包（' + (model.pkg ? model.pkg.id + ' v' + model.pkg.version : '—') + '），与 Agent 调用 ontology_* 工具看到的是同一份文件。写入路径已开放：Agent 可新增/替换对象并发布版本。'
+            : '当前显示的是内嵌演示数据：宿主 API 尚未连接（' + model.phase + '）。其余 Studio（数据接入、应用构建、治理、市场、可观测）仍是骨架演示。'
         )
       );
     }
 
     const VIEWS = ['业务视角', '数据视角', '技术视角', 'AI 视角'];
 
-    function OntologyPage() {
+    function OntologyPage(props) {
+      const model = props.model || buildModel({ phase: 'demo' });
+      const objects = model.objects && model.objects.length ? model.objects : OBJECTS;
       const [sel, setSel] = useState('Inventory');
       const [view, setView] = useState(VIEWS[0]);
-      const obj = OBJECTS.filter((o) => o.id === sel)[0] || OBJECTS[0];
+      const obj = objects.filter((o) => o.id === sel)[0] || objects[0];
 
       const rows = obj.props.map((p) => {
         const isKey = obj.keys.indexOf(p.name) >= 0;
@@ -773,7 +954,10 @@ window.__ModuleLoader__.load({
         if (view === '数据视角')
           return Object.assign(base, { c3: isKey ? '是' : '否', c4: p.source || '—' });
         if (view === '技术视角')
-          return Object.assign(base, { c3: obj.table + '.' + p.name, c4: isKey ? 'unique' : p.indexed ? 'index' : '—' });
+          return Object.assign(base, {
+            c3: obj.table ? obj.table + '.' + p.name : p.source || '—',
+            c4: isKey ? 'unique' : p.indexed ? 'index' : '—',
+          });
         return Object.assign(base, {
           c3: p.constraint || (p.required ? '必填，非空' : '可空'),
           c4: p.required ? '可读写' : '只读',
@@ -788,11 +972,11 @@ window.__ModuleLoader__.load({
         { className: 'os-split' },
         h(
           Card,
-          { title: '对象清单', sub: OBJECTS.length + ' 个', flush: true },
+          { title: '对象清单', sub: objects.length + ' 个', flush: true },
           h(
             'div',
             { style: { padding: '4px 0 6px' } },
-            OBJECTS.map((o) =>
+            objects.map((o) =>
               h(
                 'button',
                 {
@@ -1348,8 +1532,15 @@ window.__ModuleLoader__.load({
      * ------------------------------------------------------------------ */
     function OntologyStudio() {
       const [page, setPage] = useState('overview');
+      const ontology = useOntologyState();
+      const model = useMemo(function () {
+        return buildModel(ontology);
+      }, [ontology]);
       const meta = PAGE[page] || PAGE.overview;
       const Body = PAGES[page] || OverviewPage;
+      const pkgBadge = model.pkg
+        ? h(Badge, { tone: 'brand' }, model.pkg.id + ' v' + model.pkg.version)
+        : h(Badge, { tone: 'brand' }, 'retail.store-inventory');
       return h(
         'div',
         { className: 'os-root' },
@@ -1389,7 +1580,7 @@ window.__ModuleLoader__.load({
               )
             )
           ),
-          h('div', { className: 'os-rail-foot' }, '骨架版 v0.2 · 演示数据 + 可用 Agent 工具')
+          h('div', { className: 'os-rail-foot' }, model.live ? 'v0.3 · 已连接宿主资产' : 'v0.3 · ' + model.label)
         ),
         h(
           'div',
@@ -1398,11 +1589,13 @@ window.__ModuleLoader__.load({
             'header',
             { className: 'os-head' },
             h('div', { className: 'os-head-t' }, h('h1', { className: 'os-title' }, meta[0]), h('div', { className: 'os-desc' }, meta[1])),
-            h(Badge, { tone: 'brand' }, 'retail.store-inventory'),
+            pkgBadge,
+            h(Badge, { tone: model.live ? 'on' : 'warn' }, model.label),
+            model.problems.length ? h(Badge, { tone: 'err' }, model.problems.length + ' 个校验问题') : null,
             h('button', { type: 'button', className: 'os-btn', disabled: true }, '切换环境：生产'),
             h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产')
           ),
-          h('div', { className: 'os-body' }, h(Body))
+          h('div', { className: 'os-body' }, h(Body, { model: model }))
         )
       );
     }
