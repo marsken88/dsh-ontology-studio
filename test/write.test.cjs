@@ -31,10 +31,11 @@ function tempAssets() {
   return dir;
 }
 
-function fakeContext() {
+function fakeContext(approval) {
   const registered = [];
   return {
     registered,
+    approvalCalls: [],
     ctx: {
       tools: {
         register: (definition) => {
@@ -44,14 +45,17 @@ function fakeContext() {
       },
       effect: (run) => run(),
       inject: () => () => {},
+      get: (name) => (name === 'approval' ? approval : undefined),
     },
   };
 }
 
-async function loadTools(dir) {
+async function loadTools(dir, options = {}) {
   const mod = await import('../index.js');
-  const { ctx, registered } = fakeContext();
-  mod.apply(ctx, { assetsDir: dir });
+  const { ctx, registered } = fakeContext(options.approval);
+  const config = Object.assign({ assetsDir: dir, approval: 'never' }, options.config || {});
+  delete config.approval_stub;
+  mod.apply(ctx, config);
   return Object.fromEntries(registered.map((d) => [d.name, d]));
 }
 
@@ -411,6 +415,154 @@ function readPackage(dir) {
     );
     assert.equal(result.ok, false);
     assert.ok(result.message.includes('Inventory'));
+  });
+
+  console.log('\n审批闸门');
+
+  const AGENT = { id: 'session-1' };
+
+  await it('默认 destructive 模式下删除需要审批，无审批服务则拒绝', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir, { config: { approval: 'destructive' } });
+    const beforeText = fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8');
+    const result = await tools.ontology_delete_link.execute(
+      { packageId: 'retail.store-inventory', linkId: 'member_shops_at_store' },
+      { agent: AGENT }
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.approval, 'unavailable');
+    assert.ok(result.message.includes('审批服务不可用'));
+    assert.equal(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'), beforeText);
+  });
+
+  await it('审批被拒绝时什么也不写', async () => {
+    const dir = tempAssets();
+    let asked = null;
+    const tools = await loadTools(dir, {
+      approval: {
+        request: async (req) => {
+          asked = req;
+          return 'rejected';
+        },
+      },
+      config: { approval: 'destructive' },
+    });
+    const beforeText = fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8');
+    const result = await tools.ontology_delete_object.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Inventory', cascade: true },
+      { agent: AGENT, callId: 'call-1' }
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.approval, 'rejected');
+    assert.ok(asked, '应当发起审批请求');
+    assert.equal(asked.toolName, 'ontology_delete_object');
+    assert.equal(asked.callId, 'call-1');
+    assert.ok(asked.reason.includes('Inventory'));
+    assert.equal(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'), beforeText);
+  });
+
+  await it("只有 'allowed-once' 放行，且放行后照常写入", async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir, {
+      approval: { request: async () => 'allowed-once' },
+      config: { approval: 'destructive' },
+    });
+    const result = await tools.ontology_delete_link.execute(
+      { packageId: 'retail.store-inventory', linkId: 'member_shops_at_store' },
+      { agent: AGENT }
+    );
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    const saved = readPackage(dir);
+    assert.equal(saved.links.length, 4);
+  });
+
+  await it("其余 outcome（cancelled / unavailable）一律失败关闭", async () => {
+    for (const outcome of ['cancelled', 'unavailable', 'whatever']) {
+      const dir = tempAssets();
+      const tools = await loadTools(dir, {
+        approval: { request: async () => outcome },
+        config: { approval: 'destructive' },
+      });
+      const result = await tools.ontology_publish.execute(
+        { packageId: 'retail.store-inventory' },
+        { agent: AGENT }
+      );
+      assert.equal(result.ok, false, outcome + ' 不应放行');
+      assert.equal(result.approval, outcome);
+    }
+  });
+
+  await it('审批服务抛错时按失败关闭处理', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir, {
+      approval: {
+        request: async () => {
+          throw new Error('no open turn');
+        },
+      },
+      config: { approval: 'destructive' },
+    });
+    const result = await tools.ontology_publish.execute({ packageId: 'retail.store-inventory' }, { agent: AGENT });
+    assert.equal(result.ok, false);
+    assert.equal(result.approval, 'unavailable');
+    assert.ok(result.message.includes('no open turn'));
+  });
+
+  await it('destructive 模式下非破坏性写入不打扰用户', async () => {
+    const dir = tempAssets();
+    let calls = 0;
+    const tools = await loadTools(dir, {
+      approval: {
+        request: async () => {
+          calls += 1;
+          return 'rejected';
+        },
+      },
+      config: { approval: 'destructive' },
+    });
+    const result = await tools.ontology_upsert_object.execute(
+      {
+        packageId: 'retail.store-inventory',
+        object: {
+          id: 'Warehouse',
+          name: '仓库',
+          keys: ['warehouseId'],
+          properties: [{ name: 'warehouseId', type: 'string', required: true }],
+        },
+      },
+      { agent: AGENT }
+    );
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    assert.equal(calls, 0, '新增对象不应触发审批');
+  });
+
+  await it("approval: 'all' 时连新增对象也要审批", async () => {
+    const dir = tempAssets();
+    let calls = 0;
+    const tools = await loadTools(dir, {
+      approval: {
+        request: async () => {
+          calls += 1;
+          return 'rejected';
+        },
+      },
+      config: { approval: 'all' },
+    });
+    const result = await tools.ontology_upsert_object.execute(
+      {
+        packageId: 'retail.store-inventory',
+        object: {
+          id: 'Warehouse',
+          name: '仓库',
+          keys: ['warehouseId'],
+          properties: [{ name: 'warehouseId', type: 'string', required: true }],
+        },
+      },
+      { agent: AGENT }
+    );
+    assert.equal(calls, 1);
+    assert.equal(result.ok, false);
+    assert.equal(result.approval, 'rejected');
   });
 
   console.log('\nstore.save');

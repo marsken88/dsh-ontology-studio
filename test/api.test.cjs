@@ -85,6 +85,7 @@ async function call(route, url, method = 'GET') {
     const body = res.json();
     assert.equal(body.ok, true);
     assert.equal(body.value.readOnly, false, '默认不是只读模式');
+    assert.equal(body.value.approval, 'destructive', '默认破坏性操作需审批');
     assert.equal(body.value.packages.length, 1);
     const pkg = body.value.packages[0];
     assert.equal(pkg.id, 'retail.store-inventory');

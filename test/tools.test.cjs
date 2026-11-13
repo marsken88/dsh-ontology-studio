@@ -58,6 +58,10 @@ function fakeContext(options = {}) {
         }
         return () => {};
       },
+      /** Optional-service lookup, as Cordis exposes it. */
+      get(name) {
+        return name === 'approval' ? options.approval : undefined;
+      },
     },
   };
 }

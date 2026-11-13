@@ -29,9 +29,15 @@ export function apply(ctx, config = {}) {
   const assetsDir = config.assetsDir ? path.resolve(config.assetsDir) : path.join(here, 'assets');
   const store = createStore({ dir: assetsDir });
 
+  /** `readonly` removes write tools entirely; `open` (default) keeps them. */
+  const writeMode = config.writeMode === 'readonly' ? 'readonly' : 'open';
+
+  /** Which writes need a human decision: never | destructive (default) | all. */
+  const approvalMode = ['never', 'destructive', 'all'].includes(config.approval) ? config.approval : 'destructive';
+
   /* The panel is a separate process; it reads the same store over HTTP. */
   ctx.inject(['webServer'], (webCtx) => {
-    registerRoutes(webCtx, { store, prefix: ROUTE_PREFIX, readOnly: config.writeMode === 'readonly' });
+    registerRoutes(webCtx, { store, prefix: ROUTE_PREFIX, readOnly: writeMode === 'readonly', approval: approvalMode });
   });
 
   const register = (definition) => {
@@ -39,15 +45,58 @@ export function apply(ctx, config = {}) {
     ctx.effect(add);
   };
 
-  /**
-   * Capability gate. `writeMode: 'readonly'` is not a UI switch: write tools are
-   * never registered, so no agent can call them and no approval workaround exists.
-   */
-  const writeMode = config.writeMode === 'readonly' ? 'readonly' : 'open';
+  /** Write tools disappear entirely in readonly mode — not a UI toggle. */
   const registerWrite = (definition) => {
     if (writeMode === 'readonly') return;
     register(definition);
   };
+
+  /**
+   * Per-call approval gate: only `'allowed-once'` grants a write. A missing
+   * service, a missing session, or a thrown request (what an idle turn yields)
+   * all fail closed. Destructiveness and mode come from the caller.
+   */
+  async function gateWrite(exec, spec) {
+    const needed = approvalMode === 'all' || (approvalMode === 'destructive' && spec.destructive === true);
+    if (!needed) return { allowed: true, outcome: 'not-required' };
+
+    const approval = ctx.get('approval');
+    const agent = exec && exec.agent;
+    if (!approval || typeof approval.request !== 'function' || !agent) {
+      return {
+        allowed: false,
+        outcome: 'unavailable',
+        message: '该写入需要人工审批，但审批服务不可用或当前没有会话上下文，已拒绝写入',
+      };
+    }
+    try {
+      const outcome = await approval.request({
+        agent,
+        toolName: spec.toolName,
+        callId: exec.callId,
+        reason: spec.reason,
+        displayReason: { en: spec.reason, 'zh-CN': spec.reason },
+        signal: exec.signal,
+      });
+      if (outcome === 'allowed-once') return { allowed: true, outcome };
+      return {
+        allowed: false,
+        outcome,
+        message:
+          outcome === 'rejected'
+            ? '人工审批被拒绝，未写入磁盘'
+            : outcome === 'cancelled'
+              ? '审批被取消，未写入磁盘'
+              : '审批不可用（无应答方），已按失败关闭处理，未写入磁盘',
+      };
+    } catch (error) {
+      return {
+        allowed: false,
+        outcome: 'unavailable',
+        message: `审批请求失败（${error && error.message}），未写入磁盘`,
+      };
+    }
+  }
 
   /* ------------------------------------------------------------------ *
    * ontology_list
@@ -390,7 +439,15 @@ export function apply(ctx, config = {}) {
         );
       },
     },
-    execute: async (args) => {
+    execute: async (args, exec) => {
+      const gate = await gateWrite(exec, {
+        toolName: 'ontology_upsert_object',
+        destructive: false,
+        reason: `新增或替换对象 ${args.object && args.object.id}（${args.packageId}）`,
+      });
+      if (!gate.allowed) {
+        return { ok: false, approval: gate.outcome, message: gate.message };
+      }
       const { entry } = await store.get(args.packageId);
       if (!entry || !entry.ir) {
         return { ok: false, message: `资产包不存在：${args.packageId}` };
@@ -471,7 +528,15 @@ export function apply(ctx, config = {}) {
         );
       },
     },
-    execute: async (args) => {
+    execute: async (args, exec) => {
+      const gate = await gateWrite(exec, {
+        toolName: 'ontology_publish',
+        destructive: true,
+        reason: `发布本体包 ${args.packageId}（${args.bump || 'patch'} 版本递增）`,
+      });
+      if (!gate.allowed) {
+        return { ok: false, approval: gate.outcome, message: gate.message };
+      }
       const { entry } = await store.get(args.packageId);
       if (!entry || !entry.ir) {
         return { ok: false, message: `资产包不存在：${args.packageId}` };
@@ -534,7 +599,15 @@ export function apply(ctx, config = {}) {
         );
       },
     },
-    execute: async (args) => {
+    execute: async (args, exec) => {
+      const gate = await gateWrite(exec, {
+        toolName: 'ontology_upsert_link',
+        destructive: false,
+        reason: `新增或替换关系 ${args.link && args.link.id}（${args.packageId}）`,
+      });
+      if (!gate.allowed) {
+        return { ok: false, approval: gate.outcome, message: gate.message };
+      }
       const { entry } = await store.get(args.packageId);
       if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
       if (args.link === null || typeof args.link !== 'object' || Array.isArray(args.link)) {
@@ -590,7 +663,15 @@ export function apply(ctx, config = {}) {
         return text(`未删除：${v.message || '校验未通过'}`);
       },
     },
-    execute: async (args) => {
+    execute: async (args, exec) => {
+      const gate = await gateWrite(exec, {
+        toolName: 'ontology_delete_link',
+        destructive: true,
+        reason: `删除关系 ${args.linkId}（${args.packageId}）`,
+      });
+      if (!gate.allowed) {
+        return { ok: false, approval: gate.outcome, message: gate.message };
+      }
       const { entry } = await store.get(args.packageId);
       if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
       const ir = JSON.parse(JSON.stringify(entry.ir));
@@ -667,7 +748,15 @@ export function apply(ctx, config = {}) {
         );
       },
     },
-    execute: async (args) => {
+    execute: async (args, exec) => {
+      const gate = await gateWrite(exec, {
+        toolName: 'ontology_delete_object',
+        destructive: true,
+        reason: `删除对象 ${args.objectId}（${args.packageId}${args.cascade ? '，级联清理依赖' : ''}）`,
+      });
+      if (!gate.allowed) {
+        return { ok: false, approval: gate.outcome, message: gate.message };
+      }
       const { entry } = await store.get(args.packageId);
       if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
       const ir = JSON.parse(JSON.stringify(entry.ir));

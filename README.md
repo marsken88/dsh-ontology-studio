@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.4
+## 当前状态：v0.5
 
 | 部分 | 状态 |
 | --- | --- |
@@ -18,7 +18,7 @@
 | 版本递增与发布状态机 | ✅ `ontology_publish` |
 | 面板 ↔ 宿主联通 | ✅ 面板读真实资产，断线自动回落到演示数据 |
 | 能力门禁（只读模式） | ✅ `writeMode: readonly` 直接不注册写工具 |
-| 审批闸门的逐次交互 | ❌ 未开始（策略目前只是元数据） |
+| 逐次人工审批 | ✅ 写操作调用 Host 审批服务，非 `allowed-once` 一律失败关闭 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -110,6 +110,32 @@ delete Inventory --cascade  → 删除对象 + 相关关系 + 只写它的动作
 
 面板顶栏会显示「只读模式」，`/status` 也会返回 `readOnly: true`。
 
+### 逐次审批闸门
+
+`writeMode` 是全局开关；真正决定「这一次写能不能落盘」的是审批闸门：
+
+```yaml
+config:
+  approval: destructive   # never | destructive（默认）| all
+```
+
+| 模式 | 需要审批的操作 |
+| --- | --- |
+| `never` | 无 |
+| `destructive`（默认） | 删除对象、删除关系、发布版本 |
+| `all` | 所有写入，含新增/替换对象与关系 |
+
+每次需要审批时，宿主调用 DSH 的审批服务：
+
+```js
+approval.request({ agent, toolName, callId, reason, displayReason, signal })
+  → 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+```
+
+**只有 `allowed-once` 放行**，其余三种一律拒绝写盘。审批服务不存在、没有会话上下文、请求抛错（例如当前没有打开的 turn）——同样失败关闭，并在返回里带上 `approval` 字段说明原因。
+
+面板顶栏会标明「删除/发布需审批」或「写入需审批」。
+
 ### HTTP API（面板用）
 
 | 路由 | 返回 |
@@ -123,14 +149,14 @@ delete Inventory --cascade  → 删除对象 + 相关关系 + 只写它的动作
 ## 测试
 
 ```bash
-npm test        # 五组，共 71 项断言
+npm test        # 五组，共 78 项断言
 ```
 
 | 文件 | 覆盖 |
 | --- | --- |
 | `test/ir.test.cjs` | 23 项：Schema 语义、每类错误各一条、影响分析、仓库读目录 |
 | `test/tools.test.cjs` | 14 项：激活、`ctx.effect` 挂载、九个工具端到端、只读模式不注册写工具、目录缺失降级 |
-| `test/write.test.cjs` | 22 项：对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
+| `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 12 项：三条路由、400/404/405/500、只读标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
 
@@ -183,7 +209,7 @@ dsh-ontology-studio/
 - [x] 面板消费宿主真实资产
 - [x] 删除对象与关系维护（级联策略 + 整包校验）
 - [x] 能力门禁：只读模式下写工具不注册
-- [ ] 逐次审批闸门（写操作前向用户确认）
+- [x] 逐次审批闸门：写操作前调用 Host 审批服务，失败关闭
 
 **阶段二 · Harness 执行闭环**
 - [x] Agent 能直接读本体（`ontology_*`）
@@ -211,7 +237,8 @@ dsh-ontology-studio/
 
 ## 已知边界
 
-- **门禁是全局开关，不是逐次审批**：`writeMode: readonly` 能整体关掉写能力，但 `open` 模式下没有「这一次写操作要不要批准」的交互确认；本体里的 `approvalRequired` 目前仍是元数据，拦截不了任何真实调用。
+- **审批只在工具调用这一层**：闸门保护的是「Agent 通过工具改资产」。如果人直接编辑 `assets/*.ir.json`，当然不受审批约束——那本来就是模型即代码的入口。
+- **审批需要有打开的 turn**：DSH 的审批请求必须被一个进行中的回合包住；在没有 turn 的上下文里调用会失败关闭（返回 `approval: 'unavailable'`）。
 - **无并发控制**：两个写入同时发生时后者覆盖前者，尚无 etag / 乐观锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
 - **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
