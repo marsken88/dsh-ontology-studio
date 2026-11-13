@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 公司内部规划文档（来伊份飞书 wiki 正文）。这个仓库是公开的，
+# 默认不把内部战略资料推到公开仓库。仓库转为私有后删掉这一行即可入库。
+docs/plan-source.md

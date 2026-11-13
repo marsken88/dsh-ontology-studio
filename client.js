@@ -1,0 +1,1450 @@
+/**
+ * Ontology Studio — Client half.
+ *
+ * Registers one main panel (key `dsh-ontology-studio`) plus its sidebar entry, so
+ * the platform shell opens as its own column in the DSH Web GUI. Everything is
+ * demo data: no host round-trip, no persistence, no real ontology runtime.
+ */
+window.__ModuleLoader__.load({
+  id: 'dsh-ontology-studio',
+  factory(require) {
+    const React = require('react');
+    const h = React.createElement;
+    const useState = React.useState;
+    const useMemo = React.useMemo;
+
+    const PANEL_ID = 'dsh-ontology-studio';
+
+    /* ------------------------------------------------------------------ *
+     * styles — theme tokens only, so light/dark follow the host
+     * ------------------------------------------------------------------ */
+    const CSS = `
+.os-root{display:flex;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
+.os-rail{flex:0 0 212px;min-width:0;display:flex;flex-direction:column;background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1)}
+.os-brand{display:flex;align-items:center;gap:9px;padding:14px 14px 8px}
+.os-mark{flex:none;width:26px;height:26px;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;display:flex;align-items:center;justify-content:center}
+.os-brand-n{font-size:13px;font-weight:600;letter-spacing:.01em}
+.os-brand-s{font-size:11px;color:var(--dsw-alias-label-secondary)}
+.os-rail-scroll{flex:1 1 auto;min-height:0;overflow:auto;padding:2px 8px 14px}
+.os-group{font-size:11px;color:var(--dsw-alias-label-secondary);padding:12px 8px 4px;letter-spacing:.06em}
+.os-nav{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.os-nav:hover{background:var(--dsw-alias-bg-layer-2)}
+.os-nav.on{background:var(--dsw-alias-bg-layer-2);font-weight:600}
+.os-nav-i{flex:none;display:flex;color:var(--dsw-alias-label-secondary)}
+.os-nav.on .os-nav-i{color:var(--dsw-alias-brand-primary)}
+.os-nav-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.os-rail-foot{padding:9px 14px;border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary)}
+.os-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+.os-head{display:flex;align-items:flex-start;gap:14px;padding:16px 24px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.os-head-t{flex:1;min-width:0}
+.os-title{font-size:16px;font-weight:600;margin:0}
+.os-desc{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:2px}
+.os-body{flex:1 1 auto;min-height:0;overflow:auto;padding:18px 24px 48px}
+.os-grid{display:grid;gap:12px}
+.os-g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.os-g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.os-g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.os-split{display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px;align-items:start}
+.os-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
+.os-card-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.os-card-t{flex:1;min-width:0;font-size:12px;font-weight:600}
+.os-card-s{font-size:11px;color:var(--dsw-alias-label-secondary)}
+.os-card-b{padding:12px 14px}
+.os-flush{padding:0}
+.os-kpi{font-size:22px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.os-kpi-l{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:1px}
+.os-kpi-d{font-size:11px;margin-top:6px;color:var(--dsw-alias-label-secondary)}
+.os-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.os-tbl th{text-align:left;font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary);padding:8px 14px;border-bottom:1px solid var(--dsw-alias-border-l1);white-space:nowrap}
+.os-tbl td{padding:8px 14px;border-bottom:1px solid var(--dsw-alias-border-l1);vertical-align:middle}
+.os-tbl tr:last-child td{border-bottom:0}
+.os-tbl tbody tr:hover{background:var(--dsw-alias-bg-layer-2)}
+.os-b{display:inline-flex;align-items:center;gap:4px;padding:0 7px;border-radius:999px;font-size:11px;line-height:18px;border:1px solid var(--dsw-alias-border-l2);white-space:nowrap;color:var(--dsw-alias-label-secondary)}
+.os-b.on{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}
+.os-b.warn{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}
+.os-b.err{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
+.os-b.brand{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
+.os-bar{height:6px;border-radius:3px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}
+.os-bar>i{display:block;height:100%;border-radius:3px;background:var(--dsw-alias-brand-primary)}
+.os-btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:inherit;font:inherit;font-size:12px;cursor:pointer}
+.os-btn:hover{background:var(--dsw-alias-bg-layer-2)}
+.os-btn.pri{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
+.os-btn[disabled]{opacity:.55;cursor:default}
+.os-tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}
+.os-tab{border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;padding:9px 10px;margin-bottom:-1px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.os-tab.on{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-brand-primary);font-weight:600}
+.os-li{display:block;width:100%;text-align:left;padding:8px 12px;border:0;border-left:2px solid transparent;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.os-li:hover{background:var(--dsw-alias-bg-layer-2)}
+.os-li.on{background:var(--dsw-alias-bg-layer-2);border-left-color:var(--dsw-alias-brand-primary)}
+.os-li-t{font-size:12px;font-weight:600}
+.os-li-s{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:1px}
+.os-loop{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.os-loop-s{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2)}
+.os-loop-t{font-size:12px;font-weight:600}
+.os-loop-d{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:3px}
+.os-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed var(--dsw-alias-border-l1);font-size:12px}
+.os-row:last-child{border-bottom:0}
+.os-grow{flex:1;min-width:0}
+.os-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+.os-muted{color:var(--dsw-alias-label-secondary)}
+.os-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-brand-primary);margin-top:7px}
+.os-step{display:flex;gap:10px;padding:6px 0}
+.os-step-t{font-size:12px;font-weight:600}
+.os-step-d{font-size:11px;color:var(--dsw-alias-label-secondary)}
+.os-note{font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:9px 12px}
+.os-tile{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:12px;background:var(--dsw-alias-bg-layer-1)}
+.os-tile:hover{border-color:var(--dsw-alias-border-l2)}
+.os-rowhead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+`;
+
+    /* ------------------------------------------------------------------ *
+     * chrome primitives
+     * ------------------------------------------------------------------ */
+    function Badge(p) {
+      return h('span', { className: 'os-b' + (p.tone ? ' ' + p.tone : '') }, p.children);
+    }
+
+    function Card(p) {
+      return h(
+        'section',
+        { className: 'os-card', style: p.span ? { gridColumn: 'span ' + p.span } : undefined },
+        p.title
+          ? h(
+              'header',
+              { className: 'os-card-h' },
+              h('span', { className: 'os-card-t' }, p.title),
+              p.sub ? h('span', { className: 'os-card-s' }, p.sub) : null,
+              p.extra || null
+            )
+          : null,
+        h('div', { className: 'os-card-b' + (p.flush ? ' os-flush' : '') }, p.children)
+      );
+    }
+
+    function Stat(p) {
+      return h(
+        'div',
+        { className: 'os-card' },
+        h(
+          'div',
+          { className: 'os-card-b' },
+          h('div', { className: 'os-kpi' }, p.value),
+          h('div', { className: 'os-kpi-l' }, p.label),
+          p.delta ? h('div', { className: 'os-kpi-d' }, p.delta) : null
+        )
+      );
+    }
+
+    function Table(p) {
+      return h(
+        'table',
+        { className: 'os-tbl' },
+        h(
+          'thead',
+          null,
+          h(
+            'tr',
+            null,
+            p.columns.map((c) =>
+              h('th', { key: c.key, style: c.width ? { width: c.width } : undefined }, c.label)
+            )
+          )
+        ),
+        h(
+          'tbody',
+          null,
+          p.rows.map((row, i) =>
+            h(
+              'tr',
+              { key: row.key == null ? i : row.key },
+              p.columns.map((c) =>
+                h('td', { key: c.key }, c.render ? c.render(row) : String(row[c.key] == null ? '—' : row[c.key]))
+              )
+            )
+          )
+        )
+      );
+    }
+
+    function Bar(p) {
+      return h(
+        'div',
+        { className: 'os-bar' },
+        h('i', { style: { width: Math.max(0, Math.min(100, p.value)) + '%', background: p.color || undefined } })
+      );
+    }
+
+    function Tabs(p) {
+      return h(
+        'div',
+        { className: 'os-tabs' },
+        p.items.map((it) =>
+          h(
+            'button',
+            {
+              key: it,
+              type: 'button',
+              className: 'os-tab' + (it === p.value ? ' on' : ''),
+              onClick: function () {
+                p.onChange(it);
+              },
+            },
+            it
+          )
+        )
+      );
+    }
+
+    function Notes(p) {
+      return h('div', { className: 'os-note' }, p.children);
+    }
+
+    /* ------------------------------------------------------------------ *
+     * glyphs
+     * ------------------------------------------------------------------ */
+    const GLYPH = {
+      overview: h('rect', { x: 3.5, y: 3.5, width: 7, height: 7, rx: 1.6 }),
+      ontology: [
+        h('circle', { key: 'a', cx: 12, cy: 5.5, r: 2.5 }),
+        h('circle', { key: 'b', cx: 5.5, cy: 17.5, r: 2.5 }),
+        h('circle', { key: 'c', cx: 18.5, cy: 17.5, r: 2.5 }),
+        h('path', { key: 'd', d: 'M12 8v4.5M12 12.5l-4.6 3.2M12 12.5l4.6 3.2' }),
+      ],
+      data: [
+        h('ellipse', { key: 'a', cx: 12, cy: 6, rx: 6.5, ry: 2.8 }),
+        h('path', { key: 'b', d: 'M5.5 6v12c0 1.5 3 2.8 6.5 2.8s6.5-1.3 6.5-2.8V6' }),
+        h('path', { key: 'c', d: 'M5.5 12c0 1.5 3 2.8 6.5 2.8s6.5-1.3 6.5-2.8' }),
+      ],
+      logic: [
+        h('path', { key: 'a', d: 'M13.2 2.8 5 13.4h5.4L9.8 21.2 18 10.6h-5.4z' }),
+      ],
+      agent: [
+        h('rect', { key: 'a', x: 4, y: 7.5, width: 16, height: 11, rx: 3.2 }),
+        h('path', { key: 'b', d: 'M12 3.5v4M8.4 12.5v1.6M15.6 12.5v1.6' }),
+      ],
+      app: [
+        h('rect', { key: 'a', x: 3.5, y: 4.5, width: 17, height: 15, rx: 2.6 }),
+        h('path', { key: 'b', d: 'M3.5 9h17' }),
+      ],
+      governance: [
+        h('path', { key: 'a', d: 'M12 2.8 4.8 5.6v6.1c0 4.6 3 8.2 7.2 9.6 4.2-1.4 7.2-5 7.2-9.6V5.6z' }),
+        h('path', { key: 'b', d: 'M9.2 12.1l2 2 3.6-3.9' }),
+      ],
+      marketplace: [
+        h('path', { key: 'a', d: 'M5.5 7.5h13l-1.1 12a1.6 1.6 0 0 1-1.6 1.5H8.2a1.6 1.6 0 0 1-1.6-1.5z' }),
+        h('path', { key: 'b', d: 'M8.8 7.5V6.2a3.2 3.2 0 0 1 6.4 0v1.3' }),
+      ],
+      observability: [
+        h('path', { key: 'a', d: 'M3 13h3.2l2.3-6.6 3.2 12 2.6-8 1.7 2.6H21' }),
+      ],
+    };
+
+    function Glyph(p) {
+      const size = p.size || 15;
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.7,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': true,
+          style: { display: 'block' },
+        },
+        GLYPH[p.name] || GLYPH.overview
+      );
+    }
+
+    /* ------------------------------------------------------------------ *
+     * demo data
+     * ------------------------------------------------------------------ */
+    const NAV = [
+      { group: '概览', items: [{ id: 'overview', label: '平台总览', icon: 'overview' }] },
+      {
+        group: '资产生产',
+        items: [
+          { id: 'ontology', label: '本体模型', icon: 'ontology' },
+          { id: 'data', label: '数据接入', icon: 'data' },
+        ],
+      },
+      {
+        group: '执行编排',
+        items: [
+          { id: 'logic', label: '逻辑与动作', icon: 'logic' },
+          { id: 'agent', label: 'Agent & Harness', icon: 'agent' },
+        ],
+      },
+      {
+        group: '应用与生态',
+        items: [
+          { id: 'app', label: '应用构建', icon: 'app' },
+          { id: 'marketplace', label: '资产市场', icon: 'marketplace' },
+        ],
+      },
+      {
+        group: '运行与治理',
+        items: [
+          { id: 'governance', label: '治理中心', icon: 'governance' },
+          { id: 'observability', label: '可观测与评测', icon: 'observability' },
+        ],
+      },
+    ];
+
+    const PAGE = {
+      overview: ['平台总览', 'Ontology 是业务语义底座，Harness 是智能执行底座，八个 Studio 负责资产生产与运营。'],
+      ontology: ['Ontology Model Studio', '业务对象、属性、关系、动作的统一建模入口，支持四视角与影响分析。'],
+      data: ['Data Studio', '让现有系统的数据被本体统一理解：同步型与联邦型并存，不要求数据搬家。'],
+      logic: ['Logic & Action Studio', '本体不只是静态模型，还要描述业务能做什么，以及行为的实际影响。'],
+      agent: ['Agent & Harness Studio', 'Ontology-aware Harness：Agent 的上下文、工具、约束与执行边界都来自本体。'],
+      app: ['App Studio', '应用依赖本体定义而不是底层表结构，元数据变化可被页面自动感知。'],
+      marketplace: ['Marketplace & Extension Center', '能力一旦建成，就成为可复制、可安装、可升级的资产。'],
+      governance: ['Governance Center', '唯一 ID、版本、责任人、审核、审计与回滚：企业级平台的必要条件。'],
+      observability: ['Observability & Evaluation Center', '不只记录返回了什么，还记录为什么这样执行、用了什么数据、有没有真正完成任务。'],
+    };
+
+    const OBJECTS = [
+      {
+        id: 'Inventory',
+        name: '库存',
+        domain: '供应链',
+        owner: '供应链数字化组',
+        version: '1.0.3',
+        status: '已发布',
+        table: 'dwd_inventory',
+        desc: '门店 + SKU 维度的可售库存快照。',
+        keys: ['storeId', 'skuId'],
+        props: [
+          { name: 'storeId', label: '门店编号', type: 'string', required: true, source: 'pos.store_code', indexed: true },
+          { name: 'skuId', label: 'SKU 编号', type: 'string', required: true, source: 'item.sku_code', indexed: true },
+          { name: 'onHandQty', label: '在库数量', type: 'number', source: 'inv.qty_on_hand' },
+          { name: 'availableQty', label: '可售数量', type: 'number', source: 'inv.qty_available', note: '可售 = 在库 − 锁定' },
+          { name: 'lockedQty', label: '锁定数量', type: 'number', source: 'inv.qty_locked' },
+          { name: 'safetyStock', label: '安全库存', type: 'number', source: 'rule.safety_stock', constraint: '>= 0' },
+          { name: 'updatedAt', label: '更新时间', type: 'datetime', source: 'inv.gmt_modified' },
+        ],
+        links: [
+          ['belongsTo', 'Store 门店', 'n:1', '每个库存行属于一个门店'],
+          ['references', 'Product 商品', 'n:1', '每个库存行引用一个商品'],
+        ],
+        actions: [
+          ['adjustInventory', '库存调整', '需审批', '写 Inventory'],
+          ['createTransfer', '发起调拨', '需审批', '写 Order, Inventory'],
+          ['startStocktake', '发起盘点', '免审批', '写 Inventory'],
+        ],
+        impact: [
+          ['数据源', 'POS 系统 · 商品中心 API', '字段映射需重新校验'],
+          ['业务规则', '低库存预警、缺货告警', '表达式引用 availableQty'],
+          ['Agent', '库存补货 Agent', '依赖本对象做补货建议'],
+          ['应用页面', '门店库存看板', '表格列依赖本属性'],
+        ],
+      },
+      {
+        id: 'Store',
+        name: '门店',
+        domain: '门店运营',
+        owner: '门店运营组',
+        version: '1.1.0',
+        status: '已发布',
+        table: 'dim_store',
+        desc: '可独立经营的物理门店，库存与销售的最小组织单元。',
+        keys: ['storeId'],
+        props: [
+          { name: 'storeId', label: '门店编号', type: 'string', required: true, source: 'mdm.store_code', indexed: true },
+          { name: 'storeName', label: '门店名称', type: 'string', required: true, source: 'mdm.store_name' },
+          { name: 'city', label: '所属城市', type: 'string', source: 'mdm.city_code' },
+          { name: 'format', label: '店型', type: 'enum', source: 'mdm.store_format', constraint: '大卖场 | 标超 | 便利店' },
+          { name: 'openDate', label: '开业日期', type: 'date', source: 'mdm.open_date' },
+        ],
+        links: [
+          ['hasMany', 'Inventory 库存', '1:n', '一个门店有多条库存记录'],
+          ['hasMany', 'Order 订单', '1:n', '门店产生的销售与调拨单'],
+        ],
+        actions: [['createTransfer', '门店间调拨', '需审批', '写 Order, Inventory']],
+        impact: [
+          ['数据源', '门店主数据', '新增店型枚举需同步映射'],
+          ['Agent', '巡店助手 Agent', '按门店维度组织上下文'],
+        ],
+      },
+      {
+        id: 'Product',
+        name: '商品',
+        domain: '商品管理',
+        owner: '商品中心',
+        version: '2.0.1',
+        status: '已发布',
+        table: 'dim_product',
+        desc: '商品主数据，SKU 是其可售卖形态。',
+        keys: ['productId'],
+        props: [
+          { name: 'productId', label: '商品编号', type: 'string', required: true, source: 'item.item_code', indexed: true },
+          { name: 'productName', label: '商品名称', type: 'string', required: true, source: 'item.item_name' },
+          { name: 'category', label: '品类', type: 'string', source: 'item.cate_code' },
+          { name: 'brand', label: '品牌', type: 'string', source: 'item.brand_name' },
+          { name: 'shelfLifeDays', label: '保质期（天）', type: 'number', source: 'item.shelf_life' },
+        ],
+        links: [
+          ['suppliedBy', 'Supplier 供应商', 'n:m', '商品可来自多个供应商'],
+          ['referencedBy', 'Inventory 库存', '1:n', ''],
+        ],
+        actions: [],
+        impact: [['业务规则', '库存周转健康度', '按品类计算周转']],
+      },
+      {
+        id: 'Order',
+        name: '订单',
+        domain: '交易',
+        owner: '交易中台',
+        version: '1.4.2',
+        status: '已发布',
+        table: 'dwd_order',
+        desc: '含 POS 销售单、补货采购单与门店调拨单。',
+        keys: ['orderId'],
+        props: [
+          { name: 'orderId', label: '订单号', type: 'string', required: true, source: 'ord.order_no', indexed: true },
+          { name: 'orderType', label: '订单类型', type: 'enum', source: 'ord.order_type', constraint: '销售 | 采购 | 调拨' },
+          { name: 'amount', label: '金额', type: 'money', source: 'ord.pay_amount' },
+          { name: 'createdAt', label: '创建时间', type: 'datetime', source: 'ord.gmt_create' },
+        ],
+        links: [['contains', 'Product 商品', 'n:m', '订单行明细']],
+        actions: [['createReplenishment', '生成补货建议', '需审批', '写 Order']],
+        impact: [['应用页面', '补货工作台', '订单列表依赖订单类型']],
+      },
+      {
+        id: 'Supplier',
+        name: '供应商',
+        domain: '供应链',
+        owner: '采购部',
+        version: '0.9.0',
+        status: '草稿',
+        table: 'dim_supplier',
+        desc: '供货方及其供货品类范围。',
+        keys: ['supplierId'],
+        props: [
+          { name: 'supplierId', label: '供应商编号', type: 'string', required: true, source: 'sup.sup_code', indexed: true },
+          { name: 'supplierName', label: '供应商名称', type: 'string', required: true, source: 'sup.sup_name' },
+          { name: 'leadTimeDays', label: '到货周期（天）', type: 'number', source: 'sup.lead_time' },
+        ],
+        links: [['supplies', 'Product 商品', 'n:m', '']],
+        actions: [],
+        impact: [['业务规则', '补货提前期', '依赖到货周期字段']],
+      },
+      {
+        id: 'Member',
+        name: '会员',
+        domain: '会员运营',
+        owner: '会员中心',
+        version: '0.4.0',
+        status: '草稿',
+        table: 'dim_member',
+        desc: '会员基础信息与等级，用于门店维度的客群分析。',
+        keys: ['memberId'],
+        props: [
+          { name: 'memberId', label: '会员编号', type: 'string', required: true, source: 'crm.member_id', indexed: true },
+          { name: 'level', label: '会员等级', type: 'enum', source: 'crm.member_level', constraint: '普通 | 银卡 | 金卡' },
+          { name: 'joinDate', label: '入会日期', type: 'date', source: 'crm.join_date' },
+        ],
+        links: [['shopsAt', 'Store 门店', 'n:m', '常到访门店']],
+        actions: [],
+        impact: [],
+      },
+    ];
+
+    const SOURCES = [
+      {
+        name: 'POS 交易库',
+        kind: '同步型',
+        dialect: 'MySQL 8.0',
+        tables: 42,
+        objects: 'Order, Store',
+        progress: 100,
+        status: 'healthy',
+        note: 'CDC 增量同步，延迟 < 30s',
+      },
+      {
+        name: '商品中心 API',
+        kind: '联邦型',
+        dialect: 'REST / OpenAPI',
+        tables: 6,
+        objects: 'Product, Supplier',
+        progress: 72,
+        status: 'building',
+        note: '按需调用，不落湖；QPS 限流 50',
+      },
+      {
+        name: '供应链中台',
+        kind: '同步型',
+        dialect: 'Hive / JDBC',
+        tables: 128,
+        objects: 'Inventory, Order',
+        progress: 88,
+        status: 'building',
+        note: 'T+1 全量 + 小时级增量',
+      },
+      {
+        name: '门店主数据',
+        kind: '联邦型',
+        dialect: 'MDM SDK',
+        tables: 4,
+        objects: 'Store',
+        progress: 100,
+        status: 'healthy',
+        note: '权威源，只读',
+      },
+    ];
+
+    const MAPPING = [
+      ['store_code', 'Inventory.storeId', 'string', '直接映射', 'ok'],
+      ['sku_code', 'Inventory.skuId', 'string', '直接映射', 'ok'],
+      ['qty_on_hand', 'Inventory.onHandQty', 'number', '直接映射', 'ok'],
+      ['qty_available', 'Inventory.availableQty', 'number', '直接映射', 'ok'],
+      ['qty_locked', 'Inventory.lockedQty', 'number', '直接映射', 'ok'],
+      ['safety_qty', 'Inventory.safetyStock', 'number', '空值默认 0', 'warn'],
+      ['gmt_modified', 'Inventory.updatedAt', 'datetime', '时区 Asia/Shanghai', 'ok'],
+      ['store_type', 'Store.format', 'enum', '枚举值需映射', 'warn'],
+    ];
+
+    const RULES = [
+      ['inventory.lowStockWarning', '低库存预警', 'availableQty < safetyStock', 'warn', '启用', '供应链数字化组'],
+      ['inventory.stockoutAlert', '缺货告警', 'availableQty <= 0', 'error', '启用', '门店运营组'],
+      ['inventory.turnoverHealth', '库存周转健康度', 'turnoverDays between 12 and 35', 'info', '启用', '供应链数字化组'],
+      ['inventory.autoReplenish', '自动补货触发', 'availableQty < safetyStock && leadTime < 3', 'warn', '草稿', '供应链数字化组'],
+    ];
+
+    const ACTIONS = [
+      ['adjustInventory', '库存调整', 'InventoryAdjustment', '需审批', 'Inventory', '1.0.3'],
+      ['createTransfer', '发起调拨', 'TransferRequest', '需审批', 'Order, Inventory', '1.0.1'],
+      ['startStocktake', '发起盘点', 'StocktakeRequest', '免审批', 'Inventory', '1.0.0'],
+      ['createReplenishment', '生成补货建议', 'ReplenishmentRequest', '需审批', 'Order', '0.8.2'],
+    ];
+
+    const FUNCTIONS = [
+      ['fn.availableQty', '可售数量计算', 'onHand − locked', '纯函数'],
+      ['fn.turnoverDays', '库存周转天数', 'avgInventory / dailySales', '纯函数'],
+      ['fn.suggestQty', '建议补货量', '需求预测 − 在库 − 在途', '调用模型服务'],
+      ['fn.routeTransfer', '调拨路径寻优', '最近门店 + 运力约束', '外部服务'],
+    ];
+
+    const AGENTS = [
+      {
+        name: '库存补货 Agent',
+        status: '已发布',
+        model: 'deepseek-v4.1-flash',
+        ontology: ['Inventory', 'Store', 'Product', 'Order'],
+        skills: ['补货建议生成', '门店对比分析'],
+        tools: ['ontology.query', 'order.create', 'notify.feishu'],
+        actions: ['createReplenishment'],
+        eval: '补货准确率 87%',
+      },
+      {
+        name: '巡店助手 Agent',
+        status: '灰度',
+        model: 'deepseek-v4.1-flash',
+        ontology: ['Store', 'Inventory'],
+        skills: ['陈列检查', '缺货巡检'],
+        tools: ['ontology.query', 'vision.read_image'],
+        actions: ['startStocktake'],
+        eval: '任务完成率 92%',
+      },
+      {
+        name: '会员运营 Agent',
+        status: '草稿',
+        model: 'deepseek-v4.1-flash',
+        ontology: ['Member', 'Store', 'Order'],
+        skills: ['客群分层', '活动效果归因'],
+        tools: ['ontology.query', 'crm.segment'],
+        actions: [],
+        eval: '尚未评测',
+      },
+    ];
+
+    const RUNTIME = [
+      ['Agent Loop', 'Think / Tool / Verify 执行循环'],
+      ['Context Engine', '本体对象 + 关系 + 规则 + 工具 + 权限'],
+      ['Tool & Skill Runtime', '统一 Tool Registry，MCP / SDK 双适配'],
+      ['Memory & Policy', '会话记忆、策略校验、人工审批闸门'],
+      ['Evaluation', 'Trace 回放、指标评测、回归验证'],
+    ];
+
+    const APPS = [
+      ['门店库存看板', '看板', 'Inventory, Store, Product', '已发布', '2 个页面模板'],
+      ['补货工作台', '工作台', 'Inventory, Order', '已发布', '含审批流'],
+      ['商品运营台', '管理台', 'Product, Supplier', '内测', '表单自动生成'],
+      ['调拨审批页', '表单', 'Inventory, Order', '草稿', '由 Action 生成'],
+    ];
+
+    const VERSIONS = [
+      ['retail.store-inventory', '1.0.0', '已发布', '供应链数字化组', '2026-11-13 09:20', '首个完整资产包'],
+      ['retail.store-inventory', '0.9.2', '已发布', '供应链数字化组', '2026-11-06 15:41', '补充规则与动作'],
+      ['本体 Inventory', '1.0.3', '已发布', '供应链数字化组', '2026-11-12 18:03', '新增 safetyStock'],
+      ['本体 Supplier', '0.9.0', '草稿', '采购部', '2026-11-11 11:12', '待审核'],
+    ];
+
+    const APPROVALS = [
+      ['调整门店 S-0213 的可售库存 −120', 'adjustInventory', '库存补货 Agent', '待审批', 'urgent'],
+      ['调拨 400 件至 S-0188（跨区域）', 'createTransfer', '运营专员 李明', '待审批', 'warn'],
+      ['发布本体 Supplier 0.9.0', 'release', '采购部 王芳', '待审批', 'warn'],
+      ['启用规则 inventory.autoReplenish', 'publishRule', '供应链数字化组', '已通过', 'on'],
+    ];
+
+    const PERMISSIONS = [
+      ['供应链数字化组', '本体 · 规则 · 动作', '读写', '4 人'],
+      ['门店运营组', '本体只读 · 动作执行', '读写（受限）', '12 人'],
+      ['商品中心', 'Product 本体维护', '读写', '3 人'],
+      ['库存补货 Agent', 'Ontology 查询 · Order 创建', '受限', '服务身份'],
+    ];
+
+    const AUDIT = [
+      ['18:03', 'Inventory.safetyStock', '新增属性', '供应链数字化组'],
+      ['17:22', '库存补货 Agent', '调用 adjustInventory（被策略拦截）', 'system/policy'],
+      ['16:40', 'retail.store-inventory 1.0.0', '发布', '供应链数字化组'],
+      ['15:05', 'Store.format', '枚举值调整', '门店运营组'],
+    ];
+
+    const ASSETS = [
+      ['门店-商品-库存资产包', '业务场景资产', '1.0.0', '本体 6 · 规则 4 · 动作 4 · Agent 1', '已安装'],
+      ['库存补货 Agent 模板', 'Agent 模板', '0.6.0', '依赖 3 个本体 · 2 个 Skill', '已安装'],
+      ['Hive 数据连接器', '连接器', '2.1.0', '平台组件', '可安装'],
+      ['零售行业语义模型', '通用语义资产', '1.2.0', 'Object 模板 24 个', '可安装'],
+      ['库存预警组件', '应用组件', '0.3.1', '依赖 Inventory 本体', '可安装'],
+      ['评测器：补货准确率', '评测器', '1.0.0', '依赖 Trace Schema', '已安装'],
+    ];
+
+    const TRACES = [
+      {
+        id: 'trace_8f2a',
+        title: '为 S-0213 生成补货建议',
+        agent: '库存补货 Agent',
+        status: '已人工审批',
+        ms: 4210,
+        tokens: '12.4k',
+        cost: '¥0.08',
+        steps: [
+          ['01 任务解析', '识别目标门店与时间窗', 'ok'],
+          ['02 上下文构建', '加载 Inventory 42 行 / 规则 2 条 / 动作 1 个', 'ok'],
+          ['03 计划', '对比近 14 天销量与在途库存', 'ok'],
+          ['04 工具调用', 'ontology.query(inventory), order.create(draft)', 'ok'],
+          ['05 结果校验', '建议量 480 件，符合安全库存约束', 'ok'],
+          ['06 人工审批', '大区经理 张伟 通过', 'ok'],
+          ['07 写回', '供应链系统回写成功', 'ok'],
+        ],
+      },
+      {
+        id: 'trace_7c11',
+        title: '调拨 400 件至 S-0188',
+        agent: '库存补货 Agent',
+        status: '等待审批',
+        ms: 3180,
+        tokens: '9.1k',
+        cost: '¥0.06',
+        steps: [
+          ['01 任务解析', '跨区域调拨，命中策略 policy.crossRegion.transfer', 'warn'],
+          ['02 上下文构建', '加载两个门店库存 + 运力约束', 'ok'],
+          ['03 计划', '确定调拨量 400 件', 'ok'],
+          ['04 工具调用', 'transfer.preview', 'ok'],
+          ['05 人工审批', '等待大区经理确认', 'warn'],
+        ],
+      },
+      {
+        id: 'trace_6b03',
+        title: '盘点 S-0213 冷冻区',
+        agent: '巡店助手 Agent',
+        status: '失败',
+        ms: 1240,
+        tokens: '3.2k',
+        cost: '¥0.02',
+        steps: [
+          ['01 任务解析', '识别盘点范围', 'ok'],
+          ['02 工具调用', 'vision.read_image 超时', 'err'],
+          ['03 重试', '仍失败，返回可恢复错误', 'err'],
+        ],
+      },
+    ];
+
+    const EVALS = [
+      ['补货准确率', '87%', '+4pt', '近 7 天 128 次执行'],
+      ['任务成功率', '94%', '+1pt', '含人工兜底'],
+      ['平均耗时', '3.9s', '−0.6s', 'P50'],
+      ['单次成本', '¥0.06', '−12%', '模型 + 工具'],
+    ];
+
+    /* ------------------------------------------------------------------ *
+     * pages
+     * ------------------------------------------------------------------ */
+    function OverviewPage() {
+      const loop = [
+        ['企业业务知识', '制度、流程、数据资产、接口、规则'],
+        ['Ontology 语义建模', '对象、属性、关系、事件、规则、动作'],
+        ['Harness 智能执行', '上下文、Skills、工具、Agent、权限、评测'],
+        ['业务应用与自动化', '查询分析、决策、运营、流程自动化'],
+      ];
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: '6', label: '本体对象', delta: '4 已发布 · 2 草稿' }),
+          h(Stat, { value: '4', label: '数据源', delta: '2 同步型 · 2 联邦型' }),
+          h(Stat, { value: '3', label: 'Agent', delta: '1 已发布 · 1 灰度' }),
+          h(Stat, { value: '18', label: '可复用资产', delta: '本月 +5' })
+        ),
+        h(
+          Card,
+          { title: '能力闭环', sub: '运行数据与人工反馈回流到资产沉淀' },
+          h(
+            'div',
+            { className: 'os-loop' },
+            loop.map((s, i) =>
+              h(
+                'div',
+                { key: s[0], className: 'os-loop-s' },
+                h('div', { className: 'os-mono os-muted' }, '0' + (i + 1)),
+                h('div', { className: 'os-loop-t' }, s[0]),
+                h('div', { className: 'os-loop-d' }, s[1])
+              )
+            )
+          )
+        ),
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          h(
+            Card,
+            { title: '近期变更', flush: true },
+            h(
+              'div',
+              { style: { padding: '4px 14px 10px' } },
+              [
+                ['10 分钟前', 'Inventory.safetyStock 新增', '供应链数字化组'],
+                ['1 小时前', '补货准确率评测通过 87%', '系统'],
+                ['3 小时前', '发布 retail.store-inventory 1.0.0', '供应链数字化组'],
+                ['昨天', '商品中心 API 映射完成 72%', '商品中心'],
+              ].map((r) =>
+                h(
+                  'div',
+                  { key: r[1], className: 'os-row' },
+                  h('span', { className: 'os-grow' }, r[1]),
+                  h('span', { className: 'os-muted os-mono' }, r[0])
+                )
+              )
+            )
+          ),
+          h(
+            Card,
+            { title: '待处理', flush: true },
+            h(
+              'div',
+              { style: { padding: '4px 14px 10px' } },
+              APPROVALS.filter((a) => a[3] === '待审批').map((a) =>
+                h(
+                  'div',
+                  { key: a[0], className: 'os-row' },
+                  h('span', { className: 'os-grow' }, a[0]),
+                  h(Badge, { tone: a[4] === 'urgent' ? 'err' : 'warn' }, a[3])
+                )
+              )
+            )
+          )
+        ),
+        h(
+          Notes,
+          null,
+          '这一版是平台骨架：导航、信息架构、数据结构与交互路径已按规划文档落地，业务能力（本体解析、数据同步、Agent 执行、审批回写）尚未接入。'
+        )
+      );
+    }
+
+    const VIEWS = ['业务视角', '数据视角', '技术视角', 'AI 视角'];
+
+    function OntologyPage() {
+      const [sel, setSel] = useState('Inventory');
+      const [view, setView] = useState(VIEWS[0]);
+      const obj = OBJECTS.filter((o) => o.id === sel)[0] || OBJECTS[0];
+
+      const rows = obj.props.map((p) => {
+        const isKey = obj.keys.indexOf(p.name) >= 0;
+        const base = { key: p.name, name: p.name, label: p.label, type: p.type };
+        if (view === '业务视角')
+          return Object.assign(base, { c3: p.note || p.label, c4: p.required ? '必填' : '可选' });
+        if (view === '数据视角')
+          return Object.assign(base, { c3: isKey ? '是' : '否', c4: p.source || '—' });
+        if (view === '技术视角')
+          return Object.assign(base, { c3: obj.table + '.' + p.name, c4: isKey ? 'unique' : p.indexed ? 'index' : '—' });
+        return Object.assign(base, {
+          c3: p.constraint || (p.required ? '必填，非空' : '可空'),
+          c4: p.required ? '可读写' : '只读',
+        });
+      });
+
+      const c3 = { 业务视角: '说明', 数据视角: '主键', 技术视角: '存储位置', 'AI 视角': '语义约束' }[view];
+      const c4 = { 业务视角: '必填', 数据视角: '来源字段', 技术视角: '索引', 'AI 视角': 'Agent 权限' }[view];
+
+      return h(
+        'div',
+        { className: 'os-split' },
+        h(
+          Card,
+          { title: '对象清单', sub: OBJECTS.length + ' 个', flush: true },
+          h(
+            'div',
+            { style: { padding: '4px 0 6px' } },
+            OBJECTS.map((o) =>
+              h(
+                'button',
+                {
+                  key: o.id,
+                  type: 'button',
+                  className: 'os-li' + (o.id === sel ? ' on' : ''),
+                  onClick: function () {
+                    setSel(o.id);
+                  },
+                },
+                h('div', { className: 'os-rowhead' }, h('span', { className: 'os-li-t' }, o.name), o.status === '草稿' ? h(Badge, { tone: 'warn' }, '草稿') : null),
+                h('div', { className: 'os-li-s' }, o.id + ' · ' + o.props.length + ' 属性')
+              )
+            )
+          )
+        ),
+        h(
+          'div',
+          { className: 'os-grid' },
+          h(
+            Card,
+            {
+              title: obj.name + '（' + obj.id + '）',
+              sub: obj.domain + ' · v' + obj.version + ' · ' + obj.owner,
+              extra: h(Badge, { tone: obj.status === '草稿' ? 'warn' : 'on' }, obj.status),
+            },
+            h('div', { className: 'os-muted', style: { marginBottom: 10 } }, obj.desc),
+            h(Tabs, { items: VIEWS, value: view, onChange: setView }),
+            h(
+              'div',
+              { style: { margin: '0 -14px' } },
+              h(Table, {
+                columns: [
+                  { key: 'name', label: '属性', width: '22%', render: (r) => h('span', { className: 'os-mono' }, r.name) },
+                  { key: 'label', label: '名称', width: '20%' },
+                  { key: 'type', label: '类型', width: '14%' },
+                  { key: 'c3', label: c3 },
+                  { key: 'c4', label: c4 },
+                ],
+                rows: rows,
+              })
+            )
+          ),
+          h(
+            'div',
+            { className: 'os-grid os-g2' },
+            h(
+              Card,
+              { title: '关系', flush: true },
+              h(Table, {
+                columns: [
+                  { key: '0', label: '类型', render: (r) => h(Badge, { tone: 'brand' }, r[0]) },
+                  { key: '1', label: '目标对象' },
+                  { key: '2', label: '基数' },
+                  { key: '3', label: '说明' },
+                ],
+                rows: obj.links.map((l) => ({ key: l[0] + l[1], 0: l[0], 1: l[1], 2: l[2], 3: l[3] || '—' })),
+              })
+            ),
+            h(
+              Card,
+              { title: '动作', flush: true },
+              obj.actions.length
+                ? h(Table, {
+                    columns: [
+                      { key: '1', label: '动作' },
+                      { key: '2', label: '审批' },
+                      { key: '3', label: '写入' },
+                    ],
+                    rows: obj.actions.map((a) => ({ key: a[0], 1: a[0] + ' · ' + a[1], 2: h(Badge, { tone: a[2] === '需审批' ? 'warn' : 'on' }, a[2]), 3: a[3] })),
+                  })
+                : h('div', { className: 'os-card-b os-muted' }, '该对象暂未定义动作。')
+            )
+          ),
+          h(
+            Card,
+            { title: '模型影响分析', sub: '修改该对象时自动识别的依赖' },
+            obj.impact.length
+              ? obj.impact.map((r) =>
+                  h(
+                    'div',
+                    { key: r[1], className: 'os-row' },
+                    h('span', { style: { width: 76, flex: 'none' }, className: 'os-mono os-muted' }, r[0]),
+                    h('span', { className: 'os-grow' }, r[1]),
+                    h('span', { className: 'os-muted' }, r[2])
+                  )
+                )
+              : h('div', { className: 'os-muted' }, '暂无下游依赖。')
+          )
+        )
+      );
+    }
+
+    function DataPage() {
+      const [sel, setSel] = useState(0);
+      const src = SOURCES[sel];
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          Card,
+          { title: '数据源', sub: SOURCES.length + ' 个已接入', flush: true },
+          h(Table, {
+            columns: [
+              { key: 'name', label: '数据源' },
+              { key: 'kind', label: '接入方式', render: (r) => h(Badge, { tone: r.kind === '同步型' ? 'brand' : '' }, r.kind) },
+              { key: 'dialect', label: '协议 / 方言' },
+              { key: 'tables', label: '表 / 接口', width: '10%' },
+              { key: 'objects', label: '映射到本体' },
+              { key: 'progress', label: '映射进度', width: '18%', render: (r) => h('div', null, h(Bar, { value: r.progress }), h('div', { className: 'os-mono os-muted', style: { marginTop: 3 } }, r.progress + '%')) },
+              {
+                key: 'status',
+                label: '状态',
+                render: (r) => h(Badge, { tone: r.status === 'healthy' ? 'on' : 'warn' }, r.status === 'healthy' ? '运行中' : '映射中'),
+              },
+            ],
+            rows: SOURCES.map((s) => Object.assign({ key: s.name }, s)),
+          })
+        ),
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          h(
+            Card,
+            { title: '字段映射 · ' + src.name, sub: src.note, flush: true },
+            h(Table, {
+              columns: [
+                { key: '0', label: '源字段', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
+                { key: '1', label: '本体属性', render: (r) => h('span', { className: 'os-mono' }, r[1]) },
+                { key: '2', label: '类型' },
+                { key: '3', label: '转换' },
+                { key: '4', label: '', width: '8%', render: (r) => h(Badge, { tone: r[4] === 'ok' ? 'on' : 'warn' }, r[4] === 'ok' ? '就绪' : '待确认') },
+              ],
+              rows: MAPPING.map((m) => ({ key: m[0], 0: m[0], 1: m[1], 2: m[2], 3: m[3], 4: m[4] })),
+            })
+          ),
+          h(
+            'div',
+            { className: 'os-grid' },
+            h(
+              Card,
+              { title: '接入策略' },
+              h(
+                'div',
+                null,
+                [
+                  ['同步型', '数据加工、同步到平台管理的对象存储或索引，适合高频查询与跨源关联。'],
+                  ['联邦型', '保留源系统作为事实来源，平台按需获取，适合权威主数据与低延迟写入。'],
+                ].map((r) =>
+                  h(
+                    'div',
+                    { key: r[0], className: 'os-row', style: { alignItems: 'flex-start' } },
+                    h('span', { style: { width: 64, flex: 'none' } }, h(Badge, { tone: 'brand' }, r[0])),
+                    h('span', { className: 'os-grow os-muted' }, r[1])
+                  )
+                )
+              )
+            ),
+            h(
+              Card,
+              { title: '切换数据源' },
+              h(
+                'div',
+                { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+                SOURCES.map((s, i) =>
+                  h(
+                    'button',
+                    {
+                      key: s.name,
+                      type: 'button',
+                      className: 'os-btn' + (i === sel ? ' pri' : ''),
+                      onClick: function () {
+                        setSel(i);
+                      },
+                    },
+                    s.name
+                  )
+                )
+              )
+            ),
+            h(Notes, null, '两种接入方式必须并存：不能为了做 Ontology 就要求企业把所有系统数据搬进平台。')
+          )
+        )
+      );
+    }
+
+    function LogicPage() {
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          Card,
+          { title: '业务规则', sub: '规则在 Runtime 校验阶段执行，Agent 无法绕过', flush: true },
+          h(Table, {
+            columns: [
+              { key: '0', label: '规则 ID', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
+              { key: '1', label: '名称' },
+              { key: '2', label: '表达式', render: (r) => h('span', { className: 'os-mono' }, r[2]) },
+              { key: '3', label: '级别', render: (r) => h(Badge, { tone: r[3] === 'error' ? 'err' : r[3] === 'warn' ? 'warn' : '' }, r[3]) },
+              { key: '4', label: '状态', render: (r) => h(Badge, { tone: r[4] === '启用' ? 'on' : 'warn' }, r[4]) },
+              { key: '5', label: '维护人' },
+            ],
+            rows: RULES.map((r) => ({ key: r[0], 0: r[0], 1: r[1], 2: r[2], 3: r[3], 4: r[4], 5: r[5] })),
+          })
+        ),
+        h(
+          Card,
+          { title: '业务动作', sub: '动作描述业务可以做什么，以及会写到哪些对象', flush: true },
+          h(Table, {
+            columns: [
+              { key: '0', label: '动作 ID', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
+              { key: '1', label: '名称' },
+              { key: '2', label: '入参', render: (r) => h('span', { className: 'os-mono' }, r[2]) },
+              { key: '3', label: '审批', render: (r) => h(Badge, { tone: r[3] === '需审批' ? 'warn' : 'on' }, r[3]) },
+              { key: '4', label: '写入对象' },
+              { key: '5', label: '版本' },
+            ],
+            rows: ACTIONS.map((r) => ({ key: r[0], 0: r[0], 1: r[1], 2: r[2], 3: r[3], 4: r[4], 5: r[5] })),
+          })
+        ),
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          h(
+            Card,
+            { title: '函数', flush: true },
+            h(Table, {
+              columns: [
+                { key: '0', label: '函数', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
+                { key: '1', label: '名称' },
+                { key: '2', label: '实现' },
+                { key: '3', label: '类型' },
+              ],
+              rows: FUNCTIONS.map((r) => ({ key: r[0], 0: r[0], 1: r[1], 2: r[2], 3: r[3] })),
+            })
+          ),
+          h(
+            Card,
+            { title: '执行约束' },
+            h(
+              'div',
+              null,
+              [
+                ['高风险动作必须人工审批', '库存调整、跨区域调拨走审批闸门'],
+                ['Agent 不得绕过权限体系', '所有写操作经 Runtime 与策略校验'],
+                ['结果必须回验', '不能因 Agent 声称成功就视为成功'],
+              ].map((r) =>
+                h(
+                  'div',
+                  { key: r[0], className: 'os-row' },
+                  h(Badge, { tone: 'brand' }, '闸门'),
+                  h('span', { className: 'os-grow' }, r[0]),
+                  h('span', { className: 'os-muted' }, r[1])
+                )
+              )
+            )
+          )
+        )
+      );
+    }
+
+    function AgentPage() {
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g3' },
+          AGENTS.map((a) =>
+            h(
+              'div',
+              { key: a.name, className: 'os-tile' },
+              h('div', { className: 'os-rowhead' }, h('span', { style: { fontWeight: 600 } }, a.name), h(Badge, { tone: a.status === '已发布' ? 'on' : a.status === '灰度' ? 'warn' : '' }, a.status)),
+              h('div', { className: 'os-muted os-mono', style: { margin: '4px 0 8px' } }, a.model),
+              h(
+                'div',
+                { className: 'os-row' },
+                h('span', { className: 'os-muted', style: { width: 46, flex: 'none' } }, '本体'),
+                h('span', { className: 'os-grow' }, a.ontology.join(' · '))
+              ),
+              h(
+                'div',
+                { className: 'os-row' },
+                h('span', { className: 'os-muted', style: { width: 46, flex: 'none' } }, 'Skills'),
+                h('span', { className: 'os-grow' }, a.skills.join(' · '))
+              ),
+              h(
+                'div',
+                { className: 'os-row' },
+                h('span', { className: 'os-muted', style: { width: 46, flex: 'none' } }, '工具'),
+                h('span', { className: 'os-grow os-mono' }, a.tools.join(' · '))
+              ),
+              h(
+                'div',
+                { className: 'os-row' },
+                h('span', { className: 'os-muted', style: { width: 46, flex: 'none' } }, '评测'),
+                h('span', { className: 'os-grow' }, a.eval)
+              )
+            )
+          )
+        ),
+        h(
+          Card,
+          { title: 'Harness Runtime 组件', sub: '独立公共服务，所有 Studio 共用', flush: true },
+          h(Table, {
+            columns: [
+              { key: '0', label: '组件', width: '22%', render: (r) => h('span', { style: { fontWeight: 600 } }, r[0]) },
+              { key: '1', label: '职责' },
+            ],
+            rows: RUNTIME.map((r) => ({ key: r[0], 0: r[0], 1: r[1] })),
+          })
+        ),
+        h(
+          Card,
+          { title: '统一执行协议', sub: '任务 → 上下文 → 计划 → 策略 → 执行 → 校验 → 审批 → 回写 → Trace' },
+          h(
+            'div',
+            { className: 'os-loop' },
+            ['任务解析', '上下文构建', '计划与策略校验', 'Agent 执行循环', '结果校验', '人工审批', '写回与 Trace'].map((s, i) =>
+              h(
+                'div',
+                { key: s, className: 'os-loop-s' },
+                h('div', { className: 'os-mono os-muted' }, '0' + (i + 1)),
+                h('div', { className: 'os-loop-t' }, s)
+              )
+            )
+          )
+        )
+      );
+    }
+
+    function AppPage() {
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          APPS.map((a) =>
+            h(
+              'div',
+              { key: a[0], className: 'os-tile' },
+              h('div', { className: 'os-rowhead' }, h('span', { style: { fontWeight: 600 } }, a[0]), h(Badge, { tone: a[3] === '已发布' ? 'on' : a[3] === '草稿' ? '' : 'warn' }, a[3])),
+              h('div', { className: 'os-muted', style: { marginTop: 4 } }, a[1] + ' · ' + a[4]),
+              h('div', { className: 'os-mono os-muted', style: { marginTop: 6 } }, '依赖本体：' + a[2])
+            )
+          )
+        ),
+        h(Notes, null, '关键设计：应用依赖 Ontology 定义而不是底层数据库表结构，本体属性变化可被页面自动感知；复杂交互仍支持代码扩展。')
+      );
+    }
+
+    function GovernancePage() {
+      const [tab, setTab] = useState('版本');
+      const body = {
+        版本: h(Table, {
+          columns: [
+            { key: '0', label: '资产', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
+            { key: '1', label: '版本' },
+            { key: '2', label: '状态', render: (r) => h(Badge, { tone: r[2] === '已发布' ? 'on' : 'warn' }, r[2]) },
+            { key: '3', label: '责任人' },
+            { key: '4', label: '时间' },
+            { key: '5', label: '说明' },
+          ],
+          rows: VERSIONS.map((r, i) => ({ key: i, 0: r[0], 1: r[1], 2: r[2], 3: r[3], 4: r[4], 5: r[5] })),
+        }),
+        审核: h(Table, {
+          columns: [
+            { key: '0', label: '变更内容' },
+            { key: '1', label: '类型', render: (r) => h('span', { className: 'os-mono' }, r[1]) },
+            { key: '2', label: '发起方' },
+            { key: '3', label: '状态', render: (r) => h(Badge, { tone: r[4] }, r[3]) },
+          ],
+          rows: APPROVALS.map((r, i) => ({ key: i, 0: r[0], 1: r[1], 2: r[2], 3: r[3], 4: r[4] === 'urgent' ? 'err' : r[4] })),
+        }),
+        权限: h(Table, {
+          columns: [
+            { key: '0', label: '角色 / 身份' },
+            { key: '1', label: '可操作范围' },
+            { key: '2', label: '权限', render: (r) => h(Badge, { tone: r[2] === '受限' || r[2] === '读写（受限）' ? 'warn' : 'on' }, r[2]) },
+            { key: '3', label: '成员' },
+          ],
+          rows: PERMISSIONS.map((r, i) => ({ key: i, 0: r[0], 1: r[1], 2: r[2], 3: r[3] })),
+        }),
+        审计: h(Table, {
+          columns: [
+            { key: '0', label: '时间', width: '10%' },
+            { key: '1', label: '对象' },
+            { key: '2', label: '动作' },
+            { key: '3', label: '操作者' },
+          ],
+          rows: AUDIT.map((r, i) => ({ key: i, 0: r[0], 1: h('span', { className: 'os-mono' }, r[1]), 2: r[2], 3: r[3] })),
+        }),
+      }[tab];
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: '26', label: '受管资产', delta: '6 个资产类型' }),
+          h(Stat, { value: '4', label: '待审批', delta: '1 项紧急' }),
+          h(Stat, { value: '9', label: '历史版本', delta: '可回滚' }),
+          h(Stat, { value: '100%', label: '变更留痕', delta: '含 Agent 操作' })
+        ),
+        h(Card, { title: '治理视图', flush: true }, h(Tabs, { items: ['版本', '审核', '权限', '审计'], value: tab, onChange: setTab }), h('div', { style: { marginTop: -1 } }, body))
+      );
+    }
+
+    function MarketplacePage() {
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g3' },
+          ASSETS.map((a) =>
+            h(
+              'div',
+              { key: a[0], className: 'os-tile' },
+              h('div', { className: 'os-rowhead' }, h('span', { style: { fontWeight: 600 } }, a[0]), h(Badge, { tone: a[4] === '已安装' ? 'on' : '' }, a[4])),
+              h('div', { className: 'os-muted', style: { marginTop: 4 } }, a[1] + ' · v' + a[2]),
+              h('div', { className: 'os-mono os-muted', style: { marginTop: 6 } }, a[3]),
+              h(
+                'div',
+                { style: { marginTop: 10, display: 'flex', gap: 6 } },
+                h('button', { type: 'button', className: 'os-btn', disabled: true }, a[4] === '已安装' ? '已安装' : '安装'),
+                h('button', { type: 'button', className: 'os-btn', disabled: true }, '详情')
+              )
+            )
+          )
+        ),
+        h(
+          Card,
+          { title: '三层资产结构', sub: '新增业务场景应该越来越快' },
+          h(
+            'div',
+            { className: 'os-grid os-g3' },
+            [
+              ['基础技术资产', '连接器、插件 SDK、组件、Runtime、模型适配器、通用工具'],
+              ['通用语义资产', 'Object 模板、Link 模板、业务术语、规则模板、行业模型'],
+              ['业务场景资产', '库存管理、会员运营、商品管理、门店运营、智能巡店'],
+            ].map((r) =>
+              h(
+                'div',
+                { key: r[0], className: 'os-loop-s' },
+                h('div', { className: 'os-loop-t' }, r[0]),
+                h('div', { className: 'os-loop-d' }, r[1])
+              )
+            )
+          )
+        )
+      );
+    }
+
+    function ObservabilityPage() {
+      const [sel, setSel] = useState(0);
+      const tr = TRACES[sel];
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          EVALS.map((e) => h(Stat, { key: e[0], value: e[1], label: e[0], delta: e[2] + ' · ' + e[3] }))
+        ),
+        h(
+          'div',
+          { className: 'os-split', style: { gridTemplateColumns: '320px minmax(0,1fr)' } },
+          h(
+            Card,
+            { title: 'Harness Trace', sub: TRACES.length + ' 条', flush: true },
+            h(
+              'div',
+              { style: { padding: '4px 0 6px' } },
+              TRACES.map((t, i) =>
+                h(
+                  'button',
+                  {
+                    key: t.id,
+                    type: 'button',
+                    className: 'os-li' + (i === sel ? ' on' : ''),
+                    onClick: function () {
+                      setSel(i);
+                    },
+                  },
+                  h('div', { className: 'os-rowhead' }, h('span', { className: 'os-li-t' }, t.title), h(Badge, { tone: t.status === '失败' ? 'err' : t.status === '等待审批' ? 'warn' : 'on' }, t.status)),
+                  h('div', { className: 'os-li-s os-mono' }, t.agent + ' · ' + t.ms + 'ms')
+                )
+              )
+            )
+          ),
+          h(
+            'div',
+            { className: 'os-grid' },
+            h(
+              Card,
+              {
+                title: tr.title,
+                sub: tr.id + ' · ' + tr.agent,
+                extra: h(Badge, { tone: tr.status === '失败' ? 'err' : tr.status === '等待审批' ? 'warn' : 'on' }, tr.status),
+              },
+              h(
+                'div',
+                { style: { display: 'flex', gap: 18, marginBottom: 10 } },
+                [
+                  ['耗时', tr.ms + 'ms'],
+                  ['Tokens', tr.tokens],
+                  ['成本', tr.cost],
+                ].map((m) =>
+                  h('div', { key: m[0] }, h('div', { className: 'os-mono os-muted' }, m[0]), h('div', { style: { fontWeight: 600 } }, m[1]))
+                )
+              ),
+              tr.steps.map((s, i) =>
+                h(
+                  'div',
+                  { key: i, className: 'os-step' },
+                  h('span', {
+                    className: 'os-dot',
+                    style: {
+                      background:
+                        s[2] === 'err'
+                          ? 'var(--dsw-alias-state-error-primary)'
+                          : s[2] === 'warn'
+                          ? 'var(--dsw-alias-state-warn-primary)'
+                          : 'var(--dsw-alias-brand-primary)',
+                    },
+                  }),
+                  h('div', { className: 'os-grow' }, h('div', { className: 'os-step-t' }, s[0]), h('div', { className: 'os-step-d' }, s[1]))
+                )
+              )
+            ),
+            h(Notes, null, '质量闭环：执行任务 → 记录过程 → 质量评测 → 优化 Harness（上下文/Prompt/工具/规则）→ 回归验证 → 发布 → 再次执行。')
+          )
+        )
+      );
+    }
+
+    const PAGES = {
+      overview: OverviewPage,
+      ontology: OntologyPage,
+      data: DataPage,
+      logic: LogicPage,
+      agent: AgentPage,
+      app: AppPage,
+      governance: GovernancePage,
+      marketplace: MarketplacePage,
+      observability: ObservabilityPage,
+    };
+
+    /* ------------------------------------------------------------------ *
+     * panel
+     * ------------------------------------------------------------------ */
+    function OntologyStudio() {
+      const [page, setPage] = useState('overview');
+      const meta = PAGE[page] || PAGE.overview;
+      const Body = PAGES[page] || OverviewPage;
+      return h(
+        'div',
+        { className: 'os-root' },
+        h('style', null, CSS),
+        h(
+          'aside',
+          { className: 'os-rail' },
+          h(
+            'div',
+            { className: 'os-brand' },
+            h('span', { className: 'os-mark' }, h(Glyph, { name: 'ontology', size: 16 })),
+            h('div', null, h('div', { className: 'os-brand-n' }, 'Ontology Studio'), h('div', { className: 'os-brand-s' }, '语义建模与智能执行'))
+          ),
+          h(
+            'div',
+            { className: 'os-rail-scroll' },
+            NAV.map((g) =>
+              h(
+                'div',
+                { key: g.group },
+                h('div', { className: 'os-group' }, g.group),
+                g.items.map((it) =>
+                  h(
+                    'button',
+                    {
+                      key: it.id,
+                      type: 'button',
+                      className: 'os-nav' + (it.id === page ? ' on' : ''),
+                      onClick: function () {
+                        setPage(it.id);
+                      },
+                    },
+                    h('span', { className: 'os-nav-i' }, h(Glyph, { name: it.icon, size: 15 })),
+                    h('span', { className: 'os-nav-l' }, it.label)
+                  )
+                )
+              )
+            )
+          ),
+          h('div', { className: 'os-rail-foot' }, '骨架版 v0.2 · 演示数据 + 可用 Agent 工具')
+        ),
+        h(
+          'div',
+          { className: 'os-main' },
+          h(
+            'header',
+            { className: 'os-head' },
+            h('div', { className: 'os-head-t' }, h('h1', { className: 'os-title' }, meta[0]), h('div', { className: 'os-desc' }, meta[1])),
+            h(Badge, { tone: 'brand' }, 'retail.store-inventory'),
+            h('button', { type: 'button', className: 'os-btn', disabled: true }, '切换环境：生产'),
+            h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产')
+          ),
+          h('div', { className: 'os-body' }, h(Body))
+        )
+      );
+    }
+
+    function PanelIcon(props) {
+      const size = (props && props.size) || 16;
+      return h(
+        'span',
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: size,
+            height: size,
+            color: props && props.active ? 'var(--dsw-alias-brand-primary)' : 'currentColor',
+          },
+        },
+        h(Glyph, { name: 'ontology', size: Math.round(size * 0.94) })
+      );
+    }
+
+    return {
+      inject: ['slots'],
+      apply(ctx) {
+        const slots = ctx.slots;
+        const label = () => 'Ontology Studio';
+        const bind = function (run) {
+          if (typeof ctx.effect === 'function') ctx.effect(run);
+          else run();
+        };
+        bind(function () {
+          return slots.inject('main', function () {
+            return slots.register({ name: 'main', key: PANEL_ID }, OntologyStudio);
+          });
+        });
+        bind(function () {
+          return slots.inject('sidebar.panellist', function () {
+            return slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 12, label: label }, PanelIcon);
+          });
+        });
+      },
+    };
+  },
+});

@@ -1,0 +1,195 @@
+/**
+ * Host half tests: activate the plugin against a fake context exactly as the
+ * Host would, then exercise every registered tool end to end against the real
+ * asset directory. Run `node test/tools.test.cjs`.
+ */
+const assert = require('node:assert/strict');
+const path = require('node:path');
+
+const ROOT = path.join(__dirname, '..');
+
+let pass = 0;
+const failures = [];
+
+async function it(name, fn) {
+  try {
+    await fn();
+    pass += 1;
+    console.log('  ok  ', name);
+  } catch (error) {
+    failures.push({ name, error });
+    console.log('  FAIL', name, '\n       ', error.message);
+  }
+}
+
+function fakeContext() {
+  const registered = [];
+  const effects = [];
+  return {
+    registered,
+    effects,
+    ctx: {
+      tools: {
+        register(definition) {
+          if (registered.some((d) => d.name === definition.name)) {
+            throw new Error('duplicate tool registration: ' + definition.name);
+          }
+          registered.push(definition);
+          return () => {};
+        },
+      },
+      effect(run) {
+        const disposer = run();
+        effects.push(disposer);
+        return disposer;
+      },
+    },
+  };
+}
+
+(async () => {
+  const mod = await import('../index.js');
+
+  console.log('\nactivation');
+
+  const { ctx, registered, effects } = fakeContext();
+  const config = { assetsDir: path.join(ROOT, 'assets') };
+
+  await it('apply 不抛错并注册四个工具', () => {
+    mod.apply(ctx, config);
+    assert.deepEqual(registered.map((d) => d.name).sort(), [
+      'ontology_get',
+      'ontology_impact',
+      'ontology_list',
+      'ontology_validate',
+    ]);
+  });
+
+  await it('每个注册都挂在 ctx.effect 上（可卸载）', () => {
+    assert.equal(effects.length, 4);
+    for (const d of effects) assert.equal(typeof d, 'function');
+  });
+
+  await it('每个工具都有 parameters 与 output.schema/render', () => {
+    for (const def of registered) {
+      assert.equal(typeof def.description, 'string');
+      assert.ok(def.description.length > 20, def.name + ' 缺少描述');
+      assert.equal(def.parameters.type, 'object');
+      assert.ok(def.output && def.output.schema, def.name + ' 缺少 output.schema');
+      assert.equal(typeof def.output.render, 'function');
+      assert.equal(typeof def.execute, 'function');
+    }
+  });
+
+  await it('inject 声明了 tools 硬依赖', () => {
+    assert.deepEqual(mod.inject, ['tools']);
+  });
+
+  const byName = Object.fromEntries(registered.map((d) => [d.name, d]));
+
+  console.log('\ntools');
+
+  await it('ontology_list 列出资产包并带统计', async () => {
+    const value = await byName.ontology_list.execute({}, {});
+    assert.equal(value.packages.length, 1);
+    const pkg = value.packages[0];
+    assert.equal(pkg.id, 'retail.store-inventory');
+    assert.equal(pkg.objects, 6);
+    assert.equal(pkg.ok, true);
+    const rendered = byName.ontology_list.output.render({}, value);
+    assert.equal(rendered[0].type, 'text');
+    assert.ok(rendered[0].text.includes('retail.store-inventory'));
+  });
+
+  await it('ontology_get 不带 objectId 时返回包摘要', async () => {
+    const value = await byName.ontology_get.execute({ packageId: 'retail.store-inventory' }, {});
+    assert.equal(value.found, true);
+    assert.equal(value.package.version, '1.0.0');
+    assert.equal(value.objects.length, 6);
+  });
+
+  await it('ontology_get 带 objectId 时返回属性/关系/动作', async () => {
+    const value = await byName.ontology_get.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Inventory' },
+      {}
+    );
+    assert.equal(value.found, true);
+    assert.equal(value.object.id, 'Inventory');
+    assert.equal(value.object.properties.length, 7);
+    assert.deepEqual(value.links.map((l) => l.target).sort(), ['Product', 'Store']);
+    assert.deepEqual(value.actions.map((a) => a.id).sort(), [
+      'adjustInventory',
+      'createTransfer',
+      'startStocktake',
+    ]);
+    const rendered = byName.ontology_get.output.render({}, value);
+    assert.ok(rendered[0].text.includes('可售数量'));
+  });
+
+  await it('ontology_get 对不存在的包/对象给出可用清单', async () => {
+    const missingPkg = await byName.ontology_get.execute({ packageId: 'nope' }, {});
+    assert.equal(missingPkg.found, false);
+    assert.deepEqual(missingPkg.available, ['retail.store-inventory']);
+
+    const missingObj = await byName.ontology_get.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Ghost' },
+      {}
+    );
+    assert.equal(missingObj.found, false);
+    assert.ok(missingObj.objects.length === 6);
+  });
+
+  await it('ontology_validate 对随包资产返回 ok', async () => {
+    const value = await byName.ontology_validate.execute({}, {});
+    assert.deepEqual(value.problems, []);
+    assert.equal(value.ok, true);
+    assert.deepEqual(value.checked, ['retail.store-inventory']);
+  });
+
+  await it('ontology_validate 对不存在的包报告 not-found', async () => {
+    const value = await byName.ontology_validate.execute({ packageId: 'nope' }, {});
+    assert.equal(value.ok, false);
+    assert.equal(value.problems[0].code, 'not-found');
+  });
+
+  await it('ontology_impact 返回 Inventory 的下游依赖', async () => {
+    const value = await byName.ontology_impact.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Inventory' },
+      {}
+    );
+    assert.equal(value.found, true);
+    assert.equal(value.dependents, 6);
+    assert.equal(value.actions.length, 3);
+    assert.equal(value.rules.length, 3);
+    const rendered = byName.ontology_impact.output.render({}, value);
+    assert.ok(rendered[0].text.includes('6 个直接下游依赖'));
+  });
+
+  await it('ontology_impact 对不存在的对象提示可用对象', async () => {
+    const value = await byName.ontology_impact.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Ghost' },
+      {}
+    );
+    assert.equal(value.found, false);
+    assert.ok(value.message.includes('Inventory'));
+  });
+
+  await it('资产目录不存在时工具优雅降级', async () => {
+    const alt = fakeContext();
+    mod.apply(alt.ctx, { assetsDir: path.join(ROOT, 'no-such-dir') });
+    const list = Object.fromEntries(alt.registered.map((d) => [d.name, d]));
+    const listed = await list.ontology_list.execute({}, {});
+    assert.deepEqual(listed.packages, []);
+    assert.equal(listed.missingDir, true);
+    const validated = await list.ontology_validate.execute({}, {});
+    assert.equal(validated.ok, false);
+    assert.equal(validated.problems[0].code, 'missing-dir');
+  });
+
+  const total = pass + failures.length;
+  console.log(`\n${pass}/${total} passed`);
+  if (failures.length) {
+    for (const f of failures) console.error('\n' + f.name + '\n', f.error);
+    process.exit(1);
+  }
+})();

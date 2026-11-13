@@ -1,0 +1,64 @@
+# 本体工作台（Ontology Studio）
+
+企业级语义建模与 Harness 智能执行平台，以 DSH 插件形式挂在 DeepSeek Harness 内：一个独立主面板、一个侧栏入口，加上四个可以被 Agent 直接调用的本体工具。
+
+## 装上之后能做什么
+
+**看**：侧栏面板图标列表里多出「本体工作台」，点开是全屏面板，左侧八个 Studio 分组导航，右侧是当前 Studio 的内容。
+
+**用**：宿主半注册了四个只读工具，Agent 可以直接回答问题，不必由人贴文档：
+
+| 工具 | 作用 |
+| --- | --- |
+| `ontology_list` | 列出资产包及其对象/关系/规则/动作数量与校验状态 |
+| `ontology_get` | 读一个包；给 `objectId` 时返回该对象的属性、关系、相关规则与动作 |
+| `ontology_validate` | 校验结构与跨引用，返回带路径的问题列表 |
+| `ontology_impact` | 对某个对象做影响分析：下游关系、规则、动作、审批策略 |
+
+试试问：「查一下 retail.store-inventory 里 Inventory 对象的字段和可用动作」「改 availableQty 会影响哪些东西？」
+
+## 八个 Studio
+
+| Studio | 这一版展示的内容 |
+| --- | --- |
+| 平台总览 | 资产计数、能力闭环、近期变更、待审批 |
+| 本体模型 Studio | 对象清单 + 属性/关系/动作明细，四视角切换，影响分析 |
+| Data Studio | 数据源清单（同步型 / 联邦型）、字段映射与映射进度 |
+| Logic & Action Studio | 业务规则、动作（含审批标记）、函数 |
+| Agent & Harness Studio | Agent 清单及其依赖的本体/Skill/工具，Runtime 组件 |
+| App Studio | 基于本体生成的应用列表与生成来源 |
+| Governance Center | 版本、审核、权限、审计四个视图 |
+| Marketplace | 可安装资产包及其依赖 |
+| Observability | Harness Trace 明细、评测指标、成本 |
+
+## 本体资产
+
+`assets/` 下的每个 `*.ir.json` 就是一份资产包，`assets/ontology-ir.schema.json` 是它的正式 Schema。编辑 JSON 文件就是全部「部署」步骤——仓库按文件 mtime 自动重校验。
+
+校验分成两层，缺一不可：
+
+- **Schema 管形状**：字段类型、必填、枚举、命名模式。
+- **代码管引用**：主键必须是已声明属性、关系两端必须存在、动作写入的对象必须存在、策略只能指向已定义动作。
+
+## 边界（这一版明确不做的事）
+
+- **只读**：不写回资产目录，面板也不保存状态。
+- **无权限校验**：界面上的权限与审批标注是示意。
+- **未接真实数据源与图存储**：Data Studio 的映射进度、字段均为示例。
+- **前端未消费工具结果**：面板读内嵌演示数据，与 `ontology_*` 尚未联通。
+
+## 文件结构
+
+- `index.js` — 宿主半，读取与校验本体、注册四个工具。
+- `lib/ir.mjs` — 纯函数校验器、统计、影响分析。
+- `lib/store.mjs` — 资产仓库，扫目录 + mtime 缓存。
+- `client.js` — 浏览器半，注册 `main` 面板与 `sidebar.panellist` 入口。
+- `cordis.patch.yml` — 把插件行插入 profile 花名册。
+- `locale/en.json`、`locale/zh.json` — 插件管理页展示用的标题、描述与详情文档指向。
+- `assets/ontology-ir.schema.json`、`assets/store-inventory.ir.json` — Schema 与示例资产包。
+- `test/` — 校验器、宿主工具、面板渲染三组测试。
+- `docs/DETAIL.md` — 插件详情页正文。
+
+## 样式约定
+
+只使用宿主主题令牌（`--dsw-alias-*`、`--dsw-specific-sidebar-fill`），不写死颜色，因此浅色/深色主题自动跟随；不加载任何 Harness Client 包，控件为自绘。

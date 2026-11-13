@@ -1,0 +1,8 @@
+# dsh-ontology-studio bundle patch: inserts the plugin row into the web profile
+# roster. The host half (exports ".") runs in the DSH host process; the
+# `dsh.client` declaration in package.json makes the browser half
+# (exports "./client") load in the Web GUI and register the Ontology Studio
+# main panel plus its sidebar entry.
+- insert:
+    - id: dsh-ontology-studio
+      name: dsh-ontology-studio

@@ -1,0 +1,111 @@
+{
+  "irVersion": "0.1.0",
+  "id": "retail.store-inventory",
+  "name": "门店-商品-库存",
+  "description": "零售场景首个完整本体资产包，用于打通建模、数据映射、规则、动作、Agent 与评测闭环。",
+  "domain": "supply-chain",
+  "version": "1.0.0",
+  "owner": "供应链数字化组",
+  "status": "published",
+  "objects": [
+    {
+      "id": "Store",
+      "name": "门店",
+      "description": "可独立经营的物理门店，库存与销售的最小组织单元。",
+      "keys": ["storeId"],
+      "properties": [
+        { "name": "storeId", "label": "门店编号", "type": "string", "required": true },
+        { "name": "storeName", "label": "门店名称", "type": "string", "required": true },
+        { "name": "city", "label": "所属城市", "type": "string" },
+        { "name": "format", "label": "店型", "type": "enum", "enum": ["大卖场", "标超", "便利店"] },
+        { "name": "openDate", "label": "开业日期", "type": "date" }
+      ]
+    },
+    {
+      "id": "Product",
+      "name": "商品",
+      "description": "商品主数据，SKU 是其可售卖形态。",
+      "keys": ["productId"],
+      "properties": [
+        { "name": "productId", "label": "商品编号", "type": "string", "required": true },
+        { "name": "productName", "label": "商品名称", "type": "string", "required": true },
+        { "name": "category", "label": "品类", "type": "string" },
+        { "name": "brand", "label": "品牌", "type": "string" },
+        { "name": "shelfLifeDays", "label": "保质期（天）", "type": "integer" }
+      ]
+    },
+    {
+      "id": "Inventory",
+      "name": "库存",
+      "description": "门店 + SKU 维度的可售库存快照。",
+      "keys": ["storeId", "skuId"],
+      "properties": [
+        { "name": "storeId", "label": "门店编号", "type": "string", "required": true },
+        { "name": "skuId", "label": "SKU 编号", "type": "string", "required": true },
+        { "name": "onHandQty", "label": "在库数量", "type": "number" },
+        { "name": "availableQty", "label": "可售数量", "type": "number" },
+        { "name": "lockedQty", "label": "锁定数量", "type": "number" },
+        { "name": "safetyStock", "label": "安全库存", "type": "number" },
+        { "name": "updatedAt", "label": "更新时间", "type": "datetime" }
+      ]
+    },
+    {
+      "id": "Order",
+      "name": "订单",
+      "description": "含 POS 销售单、补货采购单与门店调拨单。",
+      "keys": ["orderId"],
+      "properties": [
+        { "name": "orderId", "label": "订单号", "type": "string", "required": true },
+        { "name": "orderType", "label": "订单类型", "type": "enum", "enum": ["销售", "采购", "调拨"] },
+        { "name": "amount", "label": "金额", "type": "money" },
+        { "name": "createdAt", "label": "创建时间", "type": "datetime" }
+      ]
+    },
+    {
+      "id": "Supplier",
+      "name": "供应商",
+      "description": "供货方及其供货品类范围。",
+      "keys": ["supplierId"],
+      "properties": [
+        { "name": "supplierId", "label": "供应商编号", "type": "string", "required": true },
+        { "name": "supplierName", "label": "供应商名称", "type": "string", "required": true },
+        { "name": "leadTimeDays", "label": "到货周期（天）", "type": "integer" }
+      ]
+    },
+    {
+      "id": "Member",
+      "name": "会员",
+      "description": "会员基础信息与等级，用于门店维度的客群分析。",
+      "keys": ["memberId"],
+      "properties": [
+        { "name": "memberId", "label": "会员编号", "type": "string", "required": true },
+        { "name": "level", "label": "会员等级", "type": "enum", "enum": ["普通", "银卡", "金卡"] },
+        { "name": "joinDate", "label": "入会日期", "type": "date" }
+      ]
+    }
+  ],
+  "links": [
+    { "id": "inventory_belongs_to_store", "source": "Inventory", "target": "Store", "type": "belongsTo", "cardinality": "n:1" },
+    { "id": "inventory_references_product", "source": "Inventory", "target": "Product", "type": "references", "cardinality": "n:1" },
+    { "id": "order_contains_product", "source": "Order", "target": "Product", "type": "contains", "cardinality": "n:m" },
+    { "id": "product_supplied_by_supplier", "source": "Product", "target": "Supplier", "type": "suppliedBy", "cardinality": "n:m" },
+    { "id": "member_shops_at_store", "source": "Member", "target": "Store", "type": "shopsAt", "cardinality": "n:m" }
+  ],
+  "rules": [
+    { "id": "inventory.lowStockWarning", "name": "低库存预警", "expression": "availableQty < safetyStock", "severity": "warn", "enabled": true, "owner": "供应链数字化组" },
+    { "id": "inventory.stockoutAlert", "name": "缺货告警", "expression": "availableQty <= 0", "severity": "error", "enabled": true, "owner": "门店运营组" },
+    { "id": "inventory.turnoverHealth", "name": "库存周转健康度", "expression": "turnoverDays between 12 and 35", "severity": "info", "enabled": true, "owner": "供应链数字化组" },
+    { "id": "inventory.autoReplenish", "name": "自动补货触发", "expression": "availableQty < safetyStock && leadTime < 3", "severity": "warn", "enabled": false, "owner": "供应链数字化组" }
+  ],
+  "actions": [
+    { "id": "adjustInventory", "name": "库存调整", "input": "InventoryAdjustment", "approvalRequired": true, "writes": ["Inventory"] },
+    { "id": "createTransfer", "name": "发起调拨", "input": "TransferRequest", "approvalRequired": true, "writes": ["Order", "Inventory"] },
+    { "id": "startStocktake", "name": "发起盘点", "input": "StocktakeRequest", "approvalRequired": false, "writes": ["Inventory"] },
+    { "id": "createReplenishment", "name": "生成补货建议", "input": "ReplenishmentRequest", "approvalRequired": true, "writes": ["Order"] }
+  ],
+  "policies": [
+    { "id": "policy.inventory.writeApproval", "name": "库存写操作必须人工审批", "appliesTo": ["adjustInventory", "createTransfer"], "effect": "require-approval" },
+    { "id": "policy.crossRegion.transfer", "name": "跨区域调拨需大区经理确认", "appliesTo": ["createTransfer"], "effect": "require-approval" }
+  ],
+  "extensions": {}
+}
