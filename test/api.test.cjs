@@ -152,6 +152,46 @@ async function call(route, url, method = 'GET') {
     assert.equal(res.json().error, 'unknown_route');
   });
 
+  console.log('\nGET /traces');
+
+  await it('没有 trace 存储时返回 enabled:false 而不是报错', async () => {
+    const res = await call(routes[0], `${PREFIX}/traces`);
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.value.enabled, false);
+    assert.deepEqual(body.value.entries, []);
+  });
+
+  await it('有 trace 时返回条目并限制条数', async () => {
+    const calls = [];
+    const fakeTrace = {
+      enabled: true,
+      list: async (limit) => {
+        calls.push(limit);
+        return [{ ts: 1, tool: 'ontology_list', ok: true, ms: 3, summary: 'ontology_list: ' }];
+      },
+    };
+    const alt = register(ROOT);
+    registerRoutes(alt.ctx, { store, prefix: PREFIX, trace: fakeTrace });
+    const res = await call(alt.routes[0], `${PREFIX}/traces?limit=5`);
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.value.enabled, true);
+    assert.equal(body.value.entries.length, 1);
+    assert.deepEqual(calls, [5]);
+  });
+
+  await it('limit 被夹在 1..200 之间', async () => {
+    let seen = null;
+    const fakeTrace = { enabled: true, list: async (limit) => { seen = limit; return []; } };
+    const alt = register(ROOT);
+    registerRoutes(alt.ctx, { store, prefix: PREFIX, trace: fakeTrace });
+    await call(alt.routes[0], `${PREFIX}/traces?limit=9999`);
+    assert.equal(seen, 200);
+    await call(alt.routes[0], `${PREFIX}/traces?limit=0`);
+    assert.equal(seen, 1);
+  });
+
   await it('readOnly 选项透出到 /status', async () => {
     const alt = register(ROOT);
     registerRoutes(alt.ctx, { store, prefix: PREFIX, readOnly: true });

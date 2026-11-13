@@ -104,11 +104,20 @@ React.__setLive({
   file: '<assets>/store-inventory.ir.json',
   ir,
   error: null,
+  traces: [
+    { ts: 1700000000000, tool: 'ontology_list', ok: true, ms: 4, summary: 'ontology_list: ' },
+    { ts: 1700000001000, tool: 'ontology_get', ok: false, ms: 9, summary: 'ontology_get: nope', error: '资产包不存在：nope' },
+  ],
 });
-for (const p of ['overview', 'ontology']) {
+const expectations = {
+  overview: ['实时资产', ir.id, '已发布'],
+  ontology: ['Inventory', 'availableQty', 'belongsTo'],
+  observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
+};
+for (const p of Object.keys(expectations)) {
   React.__setPage(p === 'overview' ? null : p);
   const json = JSON.stringify(panel({}));
-  for (const needle of ['实时资产', ir.id, 'Inventory', '已发布']) {
+  for (const needle of expectations[p]) {
     if (!json.includes(needle)) throw new Error(`live ${p} page is missing ${needle}`);
   }
   console.log('live  :', p.padEnd(14), 'ok', (json.length / 1024).toFixed(1) + 'KB tree');

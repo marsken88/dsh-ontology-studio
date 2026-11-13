@@ -9,9 +9,12 @@
  */
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { createStore, bumpVersion } from './lib/store.mjs';
 import { impactOf, summarizeIr, validateIr } from './lib/ir.mjs';
 import { registerRoutes } from './lib/api.mjs';
+import { createTraceStore, summarizeCall } from './lib/trace.mjs';
+import { evaluateRules } from './lib/rules.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,14 +38,72 @@ export function apply(ctx, config = {}) {
   /** Which writes need a human decision: never | destructive (default) | all. */
   const approvalMode = ['never', 'destructive', 'all'].includes(config.approval) ? config.approval : 'destructive';
 
-  /* The panel is a separate process; it reads the same store over HTTP. */
-  ctx.inject(['webServer'], (webCtx) => {
-    registerRoutes(webCtx, { store, prefix: ROUTE_PREFIX, readOnly: writeMode === 'readonly', approval: approvalMode });
+  /** Execution trace: one JSON line per tool call, readable by the panel. */
+  const trace = createTraceStore({
+    file: config.traceFile ? path.resolve(config.traceFile) : path.join(path.dirname(assetsDir), '.ontology-traces.jsonl'),
+    maxLines: Number.isFinite(config.traceMaxLines) ? config.traceMaxLines : 500,
+    enabled: config.trace !== false,
   });
 
+  /** Records file for rule evaluation: `<name>.ir.json` ↔ `<name>.records.json`. */
+  const recordsFileFor = (assetsFile) => path.join(assetsDir, assetsFile.replace(/\.ir\.json$/, '.records.json'));
+
+  async function loadRecords(assetsFile) {
+    const file = recordsFileFor(assetsFile);
+    try {
+      const parsed = JSON.parse(await readFile(file, 'utf8'));
+      return { file, records: parsed, problems: [] };
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return { file, records: null, problems: ['没有找到示例数据文件：' + file] };
+      return { file, records: null, problems: [`示例数据无法解析：${error && error.message}`] };
+    }
+  }
+
+  /* The panel is a separate process; it reads the same store over HTTP. */
+  ctx.inject(['webServer'], (webCtx) => {
+    registerRoutes(webCtx, {
+      store,
+      trace,
+      prefix: ROUTE_PREFIX,
+      readOnly: writeMode === 'readonly',
+      approval: approvalMode,
+    });
+  });
+
+  /**
+   * Every tool is wrapped once: the trace records what ran, whether it
+   * succeeded and how long it took. Tracing never fails a call.
+   */
   const register = (definition) => {
-    const add = () => ctx.tools.register(definition);
-    ctx.effect(add);
+    const wrapped = Object.assign({}, definition, {
+      execute: async (args, exec) => {
+        const startedAt = Date.now();
+        let ok = true;
+        let error = null;
+        try {
+          const result = await definition.execute(args, exec);
+          // Refusals are recorded as failures: a blocked delete or a missing
+          // package is not a successful call, whatever the payload shape.
+          ok = !(result && (result.ok === false || result.found === false || result.blocked === true));
+          if (!ok && result && typeof result.message === 'string') error = result.message;
+          return result;
+        } catch (thrown) {
+          ok = false;
+          error = String(thrown && thrown.message ? thrown.message : thrown);
+          throw thrown;
+        } finally {
+          await trace.append({
+            ts: startedAt,
+            tool: definition.name,
+            ok,
+            ms: Date.now() - startedAt,
+            summary: summarizeCall(definition.name, args),
+            error,
+          });
+        }
+      },
+    });
+    ctx.effect(() => ctx.tools.register(wrapped));
   };
 
   /** Write tools disappear entirely in readonly mode — not a UI toggle. */
@@ -388,6 +449,92 @@ export function apply(ctx, config = {}) {
         };
       }
       return { found: true, ...impact };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_evaluate_rules  (read)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_evaluate_rules',
+    description:
+      '用示例事实数据真正求值本体里的业务规则（不是只看表达式字符串）。规则归属于哪个对象由它引用的属性推导；推不出来的会列为 skipped 并说明原因，而不是默认通过。返回每条规则的求值行数、违规详情与汇总。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        objectId: { type: 'string', description: '可选：只看某个对象的规则结果' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          recordsFile: { type: 'string' },
+          summary: { type: 'object' },
+          results: { type: 'array' },
+          skipped: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`求值失败：${v.message || '未知原因'}`);
+        const s = v.summary || {};
+        const lines = [
+          `规则求值：${s.evaluated} 条生效 / ${s.rules} 条声明，扫描 ${s.rows} 行数据`,
+          `违规：${s.violations} 处，涉及 ${s.violatingRules} 条规则`,
+        ];
+        for (const r of v.results || []) {
+          const mark = r.violations.length ? '✗' : '✓';
+          lines.push(
+            `${mark} ${r.rule}（${r.object}，${r.evaluated} 行）${r.violations.length ? ' → ' + r.violations.length + ' 处违规' : ''}`
+          );
+          for (const violation of (r.violations || []).slice(0, 3)) {
+            lines.push(
+              violation.error
+                ? `    row ${violation.row}: ${violation.error}`
+                : `    row ${violation.row}: ${JSON.stringify(violation.values)}`
+            );
+          }
+        }
+        for (const s2 of v.skipped || []) lines.push(`- 跳过 ${s2.rule}：${s2.reason}`);
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) {
+        return { ok: false, packageId: args.packageId, message: `资产包不存在：${args.packageId}` };
+      }
+      const loaded = await loadRecords(entry.file);
+      if (!loaded.records) {
+        return { ok: false, packageId: entry.ir.id, recordsFile: loaded.file, message: loaded.problems.join('；') };
+      }
+      if (args.objectId && !(entry.ir.objects || []).some((o) => o.id === args.objectId)) {
+        return {
+          ok: false,
+          packageId: entry.ir.id,
+          message: `对象不存在：${args.objectId}。可用对象：${(entry.ir.objects || []).map((o) => o.id).join(', ')}`,
+        };
+      }
+
+      const evaluation = evaluateRules(entry.ir, loaded.records);
+      const results = (args.objectId ? evaluation.results.filter((r) => r.object === args.objectId) : evaluation.results).map(
+        (r) => Object.assign({}, r, { violations: r.violations.slice(0, 10) })
+      );
+      return {
+        ok: true,
+        packageId: entry.ir.id,
+        recordsFile: loaded.file,
+        summary: evaluation.summary,
+        results,
+        skipped: evaluation.skipped,
+      };
     },
   });
 

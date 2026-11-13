@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.5
+## 当前状态：v0.6
 
 | 部分 | 状态 |
 | --- | --- |
@@ -19,6 +19,8 @@
 | 面板 ↔ 宿主联通 | ✅ 面板读真实资产，断线自动回落到演示数据 |
 | 能力门禁（只读模式） | ✅ `writeMode: readonly` 直接不注册写工具 |
 | 逐次人工审批 | ✅ 写操作调用 Host 审批服务，非 `allowed-once` 一律失败关闭 |
+| 规则求值 | ✅ 自有表达式求值器（不用 eval），在示例数据上真算违规 |
+| 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -61,6 +63,7 @@
 | `ontology_get` | 读 | 读一个包；带 `objectId` 时返回该对象的属性、关系、相关规则与动作 |
 | `ontology_validate` | 读 | 校验结构与跨引用，返回带路径的问题列表 |
 | `ontology_impact` | 读 | 对象影响分析：下游关系、规则、动作、审批策略 |
+| `ontology_evaluate_rules` | 读 | 用示例数据真正求值业务规则，返回违规行与不可解析规则 |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
 | `ontology_delete_link` | **写** | 删除一条关系 |
@@ -136,6 +139,46 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 
 面板顶栏会标明「删除/发布需审批」或「写入需审批」。
 
+## 规则真的能算
+
+规则在 IR 里只有一句表达式，没有对象指针。`ontology_evaluate_rules` 会：
+
+1. **推导归属**：找出「声明的属性覆盖表达式里所有标识符」的那个对象；
+2. **在示例数据上求值**：逐行计算，收集违规行与命中值；
+3. **推不出来就明说**：不猜、不默认通过。
+
+实际输出（`assets/store-inventory.records.json`，11 行数据）：
+
+```
+规则求值：2 条生效 / 4 条声明，扫描 11 行数据
+违规：4 处，涉及 2 条规则
+✗ inventory.lowStockWarning（Inventory，5 行） → 3 处违规
+    row 0: {"availableQty":80,"safetyStock":150}
+    row 4: {"availableQty":18,"safetyStock":40}
+✗ inventory.stockoutAlert（Inventory，5 行） → 1 处违规
+    row 1: {"availableQty":0}
+- 跳过 inventory.turnoverHealth：无法解析到对象：turnoverDays 不是任何对象的属性
+- 跳过 inventory.autoReplenish：无法解析到对象：leadTime 不是任何对象的属性
+```
+
+那两条被跳过的规则不是缺陷，是**真实发现**：表达式引用了本体里没有声明的字段，说明模型和规则还没对齐。
+
+求值器是手写的词法 + 递归下降（`lib/expr.mjs`、`lib/expr-lexer.mjs`），**不用 `eval`、不用 `Function`**：函数调用、赋值、分号、花括号全部是语法错误，资产文件里塞不进可执行代码。
+
+## 执行轨迹
+
+每个 `ontology_*` 调用都会追加一行 JSONL：
+
+```json
+{"ts":1794585923436,"tool":"ontology_get","ok":true,"ms":0,"summary":"ontology_get: retail.store-inventory · Inventory","error":null}
+```
+
+- 记录的是**真的发生了什么**：被拒绝的删除、找不到的包都记为 `ok: false` 并带上原因；
+- 文件超过上限自动只留最近 N 条，一行写坏（进程被杀）只是被跳过，不会让读失败；
+- 面板的「可观测与评测」页读 `/traces` 渲染，没连上宿主时才回落到演示数据。
+
+轨迹默认落在 `assetsDir` 的上一级 `.ontology-traces.jsonl`，已加入 `.gitignore`；可用 `config.traceFile` 改位置，`config.trace: false` 关闭。
+
 ### HTTP API（面板用）
 
 | 路由 | 返回 |
@@ -143,21 +186,23 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 | `GET /dsh-ontology-studio/status` | 资产目录、所有包摘要、校验问题汇总 |
 | `GET /dsh-ontology-studio/package?id=<包id>` | 完整 IR + 该文件的问题列表 |
 | `GET /dsh-ontology-studio/impact?id=<包id>&object=<对象id>` | 对象影响分析 |
+| `GET /dsh-ontology-studio/traces?limit=40` | 最近的工具调用轨迹（新→旧） |
 
 非 GET 返回 405，未知路由 404，handler 抛错返回 500（不会让请求挂住）。面板每个 Studio 的顶栏会显示数据来源：`实时资产` / `演示数据 · 服务未连接`。
 
 ## 测试
 
 ```bash
-npm test        # 五组，共 78 项断言
+npm test        # 六组，共 100 项断言
 ```
 
 | 文件 | 覆盖 |
 | --- | --- |
 | `test/ir.test.cjs` | 23 项：Schema 语义、每类错误各一条、影响分析、仓库读目录 |
-| `test/tools.test.cjs` | 14 项：激活、`ctx.effect` 挂载、九个工具端到端、只读模式不注册写工具、目录缺失降级 |
+| `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
+| `test/tools.test.cjs` | 14 项：激活、`ctx.effect` 挂载、十个工具端到端、只读模式只剩读工具、目录缺失降级 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
-| `test/api.test.cjs` | 12 项：三条路由、400/404/405/500、只读标记、目录缺失 |
+| `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
 
 写路径的测试全部在临时目录里跑，**不会改动仓库里的 `assets/`**。
@@ -171,12 +216,16 @@ dsh-ontology-studio/
 ├─ index.js                # 宿主半：六个工具 + 注册 HTTP 路由
 ├─ lib/
 │  ├─ ir.mjs               # 校验器、统计、影响分析（纯函数，无依赖）
+│  ├─ expr.mjs / expr-lexer.mjs  # 规则表达式词法与递归下降求值（不用 eval）
+│  ├─ rules.mjs            # 规则归属推导与求值
+│  ├─ trace.mjs            # 执行轨迹：追加式 JSONL，超限自动截断
 │  ├─ store.mjs            # 资产仓库：扫目录、mtime 缓存、安全写入、版本递增
 │  └─ api.mjs              # 面板用的只读 JSON 路由
 ├─ client.js               # 浏览器半：主面板 + 侧栏入口 + 八个 Studio
 ├─ assets/
 │  ├─ ontology-ir.schema.json      # IR 的正式 JSON Schema
-│  └─ store-inventory.ir.json      # 零售示例资产包
+│  ├─ store-inventory.ir.json      # 零售示例资产包
+│  └─ store-inventory.records.json # 示例事实数据（规则跑在它上面）
 ├─ test/                   # 五组测试
 ├─ locale/{en,zh}.json     # 插件管理页的标题、描述、详情文档指向
 ├─ icon.svg
@@ -213,9 +262,11 @@ dsh-ontology-studio/
 
 **阶段二 · Harness 执行闭环**
 - [x] Agent 能直接读本体（`ontology_*`）
+- [x] 规则表达式求值：归属推导 + 在示例数据上算违规
+- [x] 执行轨迹：每次工具调用落一行，面板可读
 - [ ] Context Engine：按任务自动装配对象、关系、规则、可用动作
-- [ ] Rule / Function / Action 执行与结果回验
-- [ ] 人工审批闸门 + Trace 落盘
+- [ ] Action 执行器：动作的入参校验、前置规则、执行与结果回验
+- [ ] 人工审批闸门串进业务动作流（现在只保护资产写入）
 
 **阶段三 · 资产与生态**
 - [ ] Asset Registry：依赖声明、影响分析、安装与升级
@@ -242,4 +293,5 @@ dsh-ontology-studio/
 - **无并发控制**：两个写入同时发生时后者覆盖前者，尚无 etag / 乐观锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
 - **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
-- **规则与函数不执行**：规则表达式只做引用匹配（影响分析），没有求值引擎，也没有动作执行器。
+- **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
+- **动作还不能执行**：`adjustInventory`、`createTransfer` 这些动作目前只有定义（入参名、是否需审批、写哪些对象），没有入参 Schema，也没有执行器与回写。

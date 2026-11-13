@@ -679,39 +679,45 @@ window.__ModuleLoader__.load({
     const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
 
     function useOntologyState() {
-      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null });
+      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [] });
       useEffect(function () {
         let alive = true;
+        const get = function (path) {
+          return fetch(API_BASE + path, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then(
+            function (res) {
+              return res.ok ? res.json() : Promise.reject(new Error(path + ' → ' + res.status));
+            }
+          );
+        };
         if (typeof fetch !== 'function') {
-          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch' });
+          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [] });
           return function () {};
         }
-        fetch(API_BASE + '/status', { credentials: 'same-origin', headers: { accept: 'application/json' } })
-          .then(function (res) {
-            return res.ok ? res.json() : Promise.reject(new Error('status ' + res.status));
-          })
+        get('/status')
           .then(function (body) {
             if (!alive) return null;
             const value = body && body.value;
-            const first = value && value.packages ? value.packages.filter((p) => p.ok)[0] : null;
+            const first = value && value.packages ? value.packages.filter(function (p) { return p.ok; })[0] : null;
             if (!first) {
-              setState({ phase: 'empty', value: value, file: null, ir: null, error: null });
+              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [] });
               return null;
             }
-            return fetch(API_BASE + '/package?id=' + encodeURIComponent(first.id), {
-              credentials: 'same-origin',
-              headers: { accept: 'application/json' },
-            })
-              .then(function (res) {
-                return res.ok ? res.json() : Promise.reject(new Error('package ' + res.status));
-              })
-              .then(function (pkg) {
-                if (!alive) return;
-                setState({ phase: 'live', value: value, file: pkg.value.file, ir: pkg.value.ir, error: null });
-              });
+            return get('/package?id=' + encodeURIComponent(first.id)).then(function (pkg) {
+              return get('/traces?limit=30')
+                .catch(function () {
+                  return { value: { entries: [] } };
+                })
+                .then(function (traceBody) {
+                  if (!alive) return;
+                  const entries = (traceBody && traceBody.value && traceBody.value.entries) || [];
+                  setState({ phase: 'live', value: value, file: pkg.value.file, ir: pkg.value.ir, error: null, traces: entries });
+                });
+            });
           })
           .catch(function (error) {
-            if (alive) setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message) });
+            if (alive) {
+              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [] });
+            }
           });
         return function () {
           alive = false;
@@ -793,6 +799,7 @@ window.__ModuleLoader__.load({
           label: '实时资产',
           readOnly: state.value ? state.value.readOnly === true : false,
           approval: state.value && state.value.approval ? state.value.approval : 'destructive',
+          traces: state.traces || [],
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -809,6 +816,7 @@ window.__ModuleLoader__.load({
         label: state.phase === 'offline' ? '演示数据 · 服务未连接' : '演示数据',
         readOnly: false,
         approval: 'never',
+        traces: [],
         dir: null,
         file: null,
         problems: [],
@@ -1436,7 +1444,70 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function ObservabilityPage() {
+    /** Live trace list when the Host is recording; demo detail view otherwise. */
+    function ObservabilityPage(props) {
+      const model = props.model || buildModel({ phase: 'demo' });
+      const live = model.live && model.traces && model.traces.length ? model.traces : null;
+      if (!live) return h(ObservabilityDemo, props);
+      const okCount = live.filter(function (e) { return e.ok; }).length;
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: String(live.length), label: '已记录调用', delta: '来自执行轨迹' }),
+          h(Stat, { value: String(okCount), label: '成功', delta: live.length - okCount + ' 次失败' }),
+          h(Stat, {
+            value: String(Math.round(live.reduce(function (n, e) { return n + (e.ms || 0); }, 0) / live.length)) + 'ms',
+            label: '平均耗时',
+            delta: 'P50 近似',
+          }),
+          h(Stat, { value: String(model.actions), label: '可执行动作', delta: '本体声明' })
+        ),
+        h(
+          Card,
+          { title: '执行轨迹（实时）', sub: model.dir, extra: h(Badge, { tone: 'on' }, '真实记录') },
+          h(
+            'div',
+            { style: { margin: '0 -14px' } },
+            h(Table, {
+              columns: [
+                {
+                  key: 'ts',
+                  label: '时间',
+                  width: '14%',
+                  render: function (r) {
+                    return h('span', { className: 'os-mono os-muted' }, new Date(r.ts).toLocaleTimeString());
+                  },
+                },
+                { key: 'tool', label: '工具', width: '22%', render: function (r) { return h('span', { className: 'os-mono' }, r.tool); } },
+                {
+                  key: 'ok',
+                  label: '结果',
+                  width: '10%',
+                  render: function (r) { return h(Badge, { tone: r.ok ? 'on' : 'err' }, r.ok ? 'ok' : 'failed'); },
+                },
+                { key: 'ms', label: '耗时', width: '10%', render: function (r) { return h('span', { className: 'os-mono' }, (r.ms || 0) + 'ms'); } },
+                {
+                  key: 'summary',
+                  label: '摘要',
+                  render: function (r) { return h('span', { className: 'os-muted' }, r.summary || r.error || '—'); },
+                },
+              ],
+              rows: live.map(function (entry, i) { return Object.assign({ key: i }, entry); }),
+            })
+          )
+        ),
+        h(
+          Notes,
+          null,
+          '这些是宿主真实记录的工具调用，每次 ontology_* 执行追加一行到 .ontology-traces.jsonl。评测指标仍是演示数据——真实评测需要把业务结果回写后才有基准。'
+        )
+      );
+    }
+
+    function ObservabilityDemo(props) {
       const [sel, setSel] = useState(0);
       const tr = TRACES[sel];
       return h(

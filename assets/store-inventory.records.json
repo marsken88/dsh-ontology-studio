@@ -1,0 +1,63 @@
+{
+  "packageId": "retail.store-inventory",
+  "description": "示例事实数据。规则求值跑在这份数据上，用来验证「规则能真的算出来」而不是只有表达式字符串。",
+  "objects": {
+    "Inventory": [
+      {
+        "storeId": "S-0213",
+        "skuId": "SKU-1001",
+        "onHandQty": 120,
+        "availableQty": 80,
+        "lockedQty": 40,
+        "safetyStock": 150,
+        "updatedAt": "2026-11-13T09:12:00+08:00"
+      },
+      {
+        "storeId": "S-0213",
+        "skuId": "SKU-1002",
+        "onHandQty": 0,
+        "availableQty": 0,
+        "lockedQty": 0,
+        "safetyStock": 20,
+        "updatedAt": "2026-11-13T09:12:00+08:00"
+      },
+      {
+        "storeId": "S-0213",
+        "skuId": "SKU-1003",
+        "onHandQty": 460,
+        "availableQty": 460,
+        "lockedQty": 0,
+        "safetyStock": 60,
+        "updatedAt": "2026-11-13T09:12:00+08:00"
+      },
+      {
+        "storeId": "S-0188",
+        "skuId": "SKU-1001",
+        "onHandQty": 95,
+        "availableQty": 95,
+        "lockedQty": 0,
+        "safetyStock": 50,
+        "updatedAt": "2026-11-13T09:12:00+08:00"
+      },
+      {
+        "storeId": "S-0188",
+        "skuId": "SKU-1004",
+        "onHandQty": 30,
+        "availableQty": 18,
+        "lockedQty": 12,
+        "safetyStock": 40,
+        "updatedAt": "2026-11-13T09:12:00+08:00"
+      }
+    ],
+    "Store": [
+      { "storeId": "S-0213", "storeName": "人民广场店", "city": "上海", "format": "标超", "openDate": "2019-06-01" },
+      { "storeId": "S-0188", "storeName": "虹桥天地店", "city": "上海", "format": "便利店", "openDate": "2021-03-15" }
+    ],
+    "Product": [
+      { "productId": "SKU-1001", "productName": "每日坚果 750g", "category": "坚果炒货", "brand": "自有品牌", "shelfLifeDays": 180 },
+      { "productId": "SKU-1002", "productName": "手撕面包 500g", "category": "烘焙", "brand": "自有品牌", "shelfLifeDays": 7 },
+      { "productId": "SKU-1003", "productName": "鸭脖 200g", "category": "卤味", "brand": "自有品牌", "shelfLifeDays": 15 },
+      { "productId": "SKU-1004", "productName": "桂花糕 300g", "category": "糕点", "brand": "自有品牌", "shelfLifeDays": 30 }
+    ]
+  }
+}
