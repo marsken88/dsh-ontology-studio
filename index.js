@@ -15,6 +15,7 @@ import { impactOf, summarizeIr, validateIr } from './lib/ir.mjs';
 import { registerRoutes } from './lib/api.mjs';
 import { createTraceStore, summarizeCall } from './lib/trace.mjs';
 import { evaluateRules } from './lib/rules.mjs';
+import { validateInput, applyEffect, executableActions, policiesFor } from './lib/actions.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -980,6 +981,173 @@ export function apply(ctx, config = {}) {
         cascaded,
         file: saved.file,
         problems: saved.problems,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_execute_action  (write)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_execute_action',
+    description:
+      '执行本体里声明的业务动作：校验入参 → 按动作与策略判定是否需要审批 → 把声明式副作用应用到事实数据 → 用规则回验执行前后变化。只有同时声明 inputSchema 与 effect 的动作可以执行；其余会列出来并说明原因。传 dryRun 只预览不落盘。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        actionId: { type: 'string' },
+        input: { type: 'object', description: '动作入参，字段由动作的 inputSchema 决定' },
+        dryRun: { type: 'boolean' },
+      },
+      required: ['packageId', 'actionId', 'input'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          actionId: { type: 'string' },
+          approval: { type: 'string' },
+          approvalRequired: { type: 'boolean' },
+          matched: { type: 'number' },
+          updated: { type: 'number' },
+          changed: { type: 'array' },
+          rulesBefore: { type: 'object' },
+          rulesAfter: { type: 'object' },
+          problems: { type: 'array' },
+          file: { type: 'string' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) {
+          return text(
+            lines([
+              `未执行：${v.message || '未知原因'}`,
+              ...(v.problems || []).map((p) => `  [${p.code}] ${p.field || p.path} — ${p.message}`),
+            ])
+          );
+        }
+        const out = [
+          `${v.actionId}：命中 ${v.matched} 行，更新 ${v.updated} 行${v.file ? ' → ' + v.file : '（dryRun 未写盘）'}`,
+        ];
+        for (const change of (v.changed || []).slice(0, 5)) {
+          out.push(`  ${JSON.stringify(change.before)} → ${JSON.stringify(change.after)}`);
+        }
+        if (v.rulesBefore && v.rulesAfter) {
+          out.push(`规则回验：违规 ${v.rulesBefore.violations} → ${v.rulesAfter.violations}`);
+        }
+        return text(out.join('\n'));
+      },
+    },
+    execute: async (args, exec) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) {
+        return { ok: false, actionId: args.actionId, message: `资产包不存在：${args.packageId}` };
+      }
+      const ir = entry.ir;
+      const action = (ir.actions || []).find((a) => a.id === args.actionId);
+      if (!action) {
+        return {
+          ok: false,
+          actionId: args.actionId,
+          message: `动作不存在：${args.actionId}。可用动作：${(ir.actions || []).map((a) => a.id).join(', ') || '无'}`,
+        };
+      }
+
+      const runnable = executableActions(ir);
+      if (!action.effect || !Array.isArray(action.inputSchema) || action.inputSchema.length === 0) {
+        return {
+          ok: false,
+          actionId: action.id,
+          message: `动作 ${action.id} 还没有可执行的声明（需要 inputSchema + effect）`,
+          problems: [
+            { code: 'not-executable', field: 'effect', message: '未声明 effect，无法确定它改什么' },
+          ],
+          executable: runnable.map((a) => a.id),
+        };
+      }
+
+      const validation = validateInput(action, args.input);
+      if (!validation.ok) {
+        return { ok: false, actionId: action.id, problems: validation.problems, message: '入参校验未通过' };
+      }
+
+      const policies = policiesFor(ir, action.id);
+      const approvalRequired = action.approvalRequired === true || policies.some((p) => p.effect === 'require-approval');
+      const gate = await gateWrite(exec, {
+        toolName: 'ontology_execute_action',
+        destructive: approvalRequired,
+        reason: `执行动作 ${action.id}（${action.name}）写入 ${(action.writes || []).join(', ')}`,
+      });
+      if (!gate.allowed) {
+        return { ok: false, actionId: action.id, approval: gate.outcome, approvalRequired, message: gate.message };
+      }
+
+      const loaded = await loadRecords(entry.file);
+      if (!loaded.records) {
+        return { ok: false, actionId: action.id, message: loaded.problems.join('；') };
+      }
+
+      const before = evaluateRules(ir, loaded.records).summary;
+      const working = JSON.parse(JSON.stringify(loaded.records));
+      const outcome = applyEffect(working, action, validation.value);
+      const after = evaluateRules(ir, working).summary;
+
+      if (outcome.matched === 0) {
+        return {
+          ok: false,
+          actionId: action.id,
+          approval: gate.outcome,
+          approvalRequired,
+          matched: 0,
+          message: `没有匹配到任何 ${action.effect.object} 记录（匹配键：${action.effect.matchKeys.map((k) => k + '=' + JSON.stringify(validation.value[k])).join(', ')}）`,
+        };
+      }
+
+      const rulesReport = {
+        violations: before.violations,
+        rows: before.rows,
+        violatingRules: before.violatingRules,
+      };
+      const rulesAfter = {
+        violations: after.violations,
+        rows: after.rows,
+        violatingRules: after.violatingRules,
+        delta: before.violations - after.violations,
+      };
+
+      if (args.dryRun) {
+        return {
+          ok: true,
+          actionId: action.id,
+          approval: gate.outcome,
+          approvalRequired,
+          matched: outcome.matched,
+          updated: outcome.updated,
+          changed: outcome.changed,
+          rulesBefore: rulesReport,
+          rulesAfter,
+          message: 'dryRun：未写盘',
+        };
+      }
+
+      const recordsName = entry.file.replace(/\.ir\.json$/, '.records.json');
+      const file = await store.saveRecords(recordsName, working);
+      return {
+        ok: true,
+        actionId: action.id,
+        approval: gate.outcome,
+        approvalRequired,
+        matched: outcome.matched,
+        updated: outcome.updated,
+        changed: outcome.changed,
+        rulesBefore: rulesReport,
+        rulesAfter,
+        file,
       };
     },
   });

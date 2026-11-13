@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.6
+## 当前状态：v0.7
 
 | 部分 | 状态 |
 | --- | --- |
@@ -21,6 +21,7 @@
 | 逐次人工审批 | ✅ 写操作调用 Host 审批服务，非 `allowed-once` 一律失败关闭 |
 | 规则求值 | ✅ 自有表达式求值器（不用 eval），在示例数据上真算违规 |
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
+| Action 执行器 | ✅ 入参 Schema 校验 → 审批 → 声明式副作用 → 规则回验 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -69,6 +70,7 @@
 | `ontology_delete_link` | **写** | 删除一条关系 |
 | `ontology_delete_object` | **写** | 删除对象；被引用时默认拒绝，`cascade` 才连带清理 |
 | `ontology_publish` | **写** | 校验全通过后按 `patch`/`minor`/`major` 递增版本并置为 `published` |
+| `ontology_execute_action` | **写** | 执行业务动作：入参校验 → 审批 → 应用副作用到事实数据 → 规则回验 |
 
 所有写工具都遵循同一条不变量：**先构造「写完之后」的整包再校验，不通过就什么都不写**；都支持 `dryRun` 预览。
 
@@ -179,6 +181,52 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 
 轨迹默认落在 `assetsDir` 的上一级 `.ontology-traces.jsonl`，已加入 `.gitignore`；可用 `config.traceFile` 改位置，`config.trace: false` 关闭。
 
+## 动作真的能执行
+
+动作不是一句描述，它要能跑。跑一条链路：
+
+```json
+{
+  "id": "adjustInventory",
+  "inputSchema": [
+    { "name": "storeId", "type": "string", "required": true },
+    { "name": "skuId", "type": "string", "required": true },
+    { "name": "availableQty", "type": "number", "required": true }
+  ],
+  "approvalRequired": true,
+  "writes": ["Inventory"],
+  "effect": {
+    "object": "Inventory",
+    "matchKeys": ["storeId", "skuId"],
+    "set": { "availableQty": "availableQty" }
+  }
+}
+```
+
+`ontology_execute_action` 依次做五件事：
+
+```
+① 入参校验      缺字段 / 类型错 / 负数 / 未知字段 → 直接拒绝，不碰数据
+② 判定审批      action.approvalRequired 或策略 effect=require-approval
+③ 应用副作用    按 matchKeys 定位行，只改 set 里声明的字段
+④ 规则回验      执行前后各跑一次规则，报告违规数的变化
+⑤ 写回 + 轨迹   落盘事实数据，调用本身进入 Trace
+```
+
+真实输出：
+
+```
+adjustInventory：命中 1 行，更新 1 行 → assets/store-inventory.records.json
+  {"availableQty":80} → {"availableQty":200}
+规则回验：违规 4 → 3
+```
+
+**effect 是声明式的，不含代码**：它只说改哪个对象的哪些字段、值从入参的哪个字段来。执行器是唯一碰数据的东西，资产文件依旧塞不进可执行代码。
+
+`matched === 0` 时返回失败并说明匹配键，不伪造成功——「Agent 说成功了」和「真的改了」是两件事，这一步就是拿后者卡前者。
+
+目前只有 `adjustInventory` 同时声明了 `inputSchema` 与 `effect`；其余三个动作会被明确列出为不可执行，而不是静默跑通。
+
 ### HTTP API（面板用）
 
 | 路由 | 返回 |
@@ -193,14 +241,15 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 ## 测试
 
 ```bash
-npm test        # 六组，共 100 项断言
+npm test        # 七组，共 119 项断言
 ```
 
 | 文件 | 覆盖 |
 | --- | --- |
 | `test/ir.test.cjs` | 23 项：Schema 语义、每类错误各一条、影响分析、仓库读目录 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
-| `test/tools.test.cjs` | 14 项：激活、`ctx.effect` 挂载、十个工具端到端、只读模式只剩读工具、目录缺失降级 |
+| `test/actions.test.cjs` | 19 项：入参校验、effect 声明校验、按匹配键写回、规则回验、审批拒绝不写盘 |
+| `test/tools.test.cjs` | 14 项：激活、`ctx.effect` 挂载、十一个工具端到端、只读模式只剩读工具、目录缺失降级 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
@@ -218,6 +267,7 @@ dsh-ontology-studio/
 │  ├─ ir.mjs               # 校验器、统计、影响分析（纯函数，无依赖）
 │  ├─ expr.mjs / expr-lexer.mjs  # 规则表达式词法与递归下降求值（不用 eval）
 │  ├─ rules.mjs            # 规则归属推导与求值
+│  ├─ actions.mjs          # 动作入参校验与声明式副作用
 │  ├─ trace.mjs            # 执行轨迹：追加式 JSONL，超限自动截断
 │  ├─ store.mjs            # 资产仓库：扫目录、mtime 缓存、安全写入、版本递增
 │  └─ api.mjs              # 面板用的只读 JSON 路由
@@ -265,7 +315,7 @@ dsh-ontology-studio/
 - [x] 规则表达式求值：归属推导 + 在示例数据上算违规
 - [x] 执行轨迹：每次工具调用落一行，面板可读
 - [ ] Context Engine：按任务自动装配对象、关系、规则、可用动作
-- [ ] Action 执行器：动作的入参校验、前置规则、执行与结果回验
+- [x] Action 执行器：动作的入参校验、声明式副作用、执行与规则回验
 - [ ] 人工审批闸门串进业务动作流（现在只保护资产写入）
 
 **阶段三 · 资产与生态**
@@ -294,4 +344,5 @@ dsh-ontology-studio/
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
 - **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
-- **动作还不能执行**：`adjustInventory`、`createTransfer` 这些动作目前只有定义（入参名、是否需审批、写哪些对象），没有入参 Schema，也没有执行器与回写。
+- **只有一个动作真正可执行**：`adjustInventory` 声明了 `inputSchema` + `effect`，其余三个只有定义；判断标准是「有没有声明 effect」，没有的动作会被直接列出，不会假装执行。
+- **副作用只作用于示例事实数据**：动作改的是 `*.records.json`，没有回写 POS / 供应链系统。

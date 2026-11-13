@@ -90,8 +90,31 @@
         "id": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "name": { "type": "string", "minLength": 1 },
         "input": { "type": "string" },
+        "inputSchema": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/property" },
+          "description": "入参字段声明；没有它动作就无法被校验执行"
+        },
         "approvalRequired": { "type": "boolean" },
-        "writes": { "type": "array", "items": { "type": "string" } }
+        "writes": { "type": "array", "items": { "type": "string" } },
+        "effect": { "$ref": "#/$defs/effect" }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "description": "动作对事实数据的声明式副作用：按 matchKeys 定位行，再按 set 把入参值写进字段。不含任意代码。",
+      "required": ["object", "matchKeys", "set"],
+      "additionalProperties": false,
+      "properties": {
+        "object": { "type": "string" },
+        "matchKeys": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "set": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string" },
+          "description": "对象字段 → 入参字段名"
+        }
       }
     },
     "policy": {

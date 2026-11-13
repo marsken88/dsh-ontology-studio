@@ -74,12 +74,13 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册十个工具', () => {
+  await it('apply 不抛错并注册十一个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_delete_link',
       'ontology_delete_object',
       'ontology_evaluate_rules',
+      'ontology_execute_action',
       'ontology_get',
       'ontology_impact',
       'ontology_list',
@@ -91,7 +92,7 @@ function fakeContext(options = {}) {
   });
 
   await it('每个注册都挂在 ctx.effect 上（可卸载）', () => {
-    assert.equal(effects.length, 10);
+    assert.equal(effects.length, 11);
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 

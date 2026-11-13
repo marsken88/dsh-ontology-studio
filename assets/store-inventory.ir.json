@@ -98,7 +98,23 @@
     { "id": "inventory.autoReplenish", "name": "自动补货触发", "expression": "availableQty < safetyStock && leadTime < 3", "severity": "warn", "enabled": false, "owner": "供应链数字化组" }
   ],
   "actions": [
-    { "id": "adjustInventory", "name": "库存调整", "input": "InventoryAdjustment", "approvalRequired": true, "writes": ["Inventory"] },
+    {
+      "id": "adjustInventory",
+      "name": "库存调整",
+      "input": "InventoryAdjustment",
+      "inputSchema": [
+        { "name": "storeId", "label": "门店编号", "type": "string", "required": true },
+        { "name": "skuId", "label": "SKU 编号", "type": "string", "required": true },
+        { "name": "availableQty", "label": "调整后可售数量", "type": "number", "required": true }
+      ],
+      "approvalRequired": true,
+      "writes": ["Inventory"],
+      "effect": {
+        "object": "Inventory",
+        "matchKeys": ["storeId", "skuId"],
+        "set": { "availableQty": "availableQty" }
+      }
+    },
     { "id": "createTransfer", "name": "发起调拨", "input": "TransferRequest", "approvalRequired": true, "writes": ["Order", "Inventory"] },
     { "id": "startStocktake", "name": "发起盘点", "input": "StocktakeRequest", "approvalRequired": false, "writes": ["Inventory"] },
     { "id": "createReplenishment", "name": "生成补货建议", "input": "ReplenishmentRequest", "approvalRequired": true, "writes": ["Order"] }
