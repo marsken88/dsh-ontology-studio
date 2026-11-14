@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.18
+## 当前状态：v0.18.1
 
 | 部分 | 状态 |
 | --- | --- |
@@ -462,7 +462,7 @@ ontology_export({ packageId, format: "json-schema" | "markdown", objectId? })
 ## 测试
 
 ```bash
-npm test        # 十二组，共 187 项断言
+npm test        # 十三组，共 199 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -478,6 +478,7 @@ npm test        # 十二组，共 187 项断言
 | `test/tools.test.cjs` | 21 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
+| `test/e2e.test.cjs` | 12 项：整条链路按真实使用顺序跑一遍（现状→建模→执行→回收→轨迹），验证各工具彼此自洽 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
 
 写路径的测试全部在临时目录里跑，**不会改动仓库里的 `assets/`**。

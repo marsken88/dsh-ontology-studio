@@ -132,7 +132,7 @@ async function it(name, fn) {
       { name: 'dwd_x', columns: [{ name: 'id', type: 'bigint', primaryKey: true }, { name: 'store_id', type: 'bigint' }] },
       ir
     );
-    assert.deepEqual(exact.links.map((l) => [l.id, l.target]), [['x_store_references_store', 'Store']]);
+    assert.deepEqual(exact.links.map((l) => [l.id, l.target]), [['x_references_store', 'Store']]);
 
     const qualified = draftObjectFromTable(
       {
