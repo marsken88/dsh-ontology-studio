@@ -1175,38 +1175,106 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function LogicPage() {
+    /** Rules and actions straight from the loaded package when it is live. */
+    function logicModel(model) {
+      const pkg = model && model.live ? model.pkg : null;
+      if (!pkg) {
+        return {
+          live: false,
+          rules: RULES.map((r) => ({ id: r[0], name: r[1], expression: r[2], severity: r[3], enabled: r[4] === '启用', owner: r[5] })),
+          actions: ACTIONS.map((a) => ({
+            id: a[0],
+            name: a[1],
+            input: a[2],
+            approvalRequired: a[3] === '需审批',
+            writes: a[4],
+            version: a[5],
+            executable: true,
+          })),
+        };
+      }
+      return {
+        live: true,
+        rules: (pkg.rules || []).map((r) => ({
+          id: r.id,
+          name: r.name,
+          expression: r.expression,
+          severity: r.severity,
+          enabled: r.enabled !== false,
+          owner: r.owner || '—',
+        })),
+        actions: (pkg.actions || []).map((a) => ({
+          id: a.id,
+          name: a.name,
+          input: a.input || '—',
+          approvalRequired: a.approvalRequired === true,
+          writes: (a.writes || []).join(', ') || '—',
+          version: pkg.version,
+          executable: Boolean(a.effect && Array.isArray(a.inputSchema) && a.inputSchema.length),
+          effects: Array.isArray(a.effect) ? a.effect.length : a.effect ? 1 : 0,
+        })),
+      };
+    }
+
+    function LogicPage(props) {
+      const model = (props && props.model) || buildModel({ phase: 'demo' });
+      const data = logicModel(model);
       return h(
         'div',
         { className: 'os-grid' },
         h(
           Card,
-          { title: '业务规则', sub: '规则在 Runtime 校验阶段执行，Agent 无法绕过', flush: true },
+          {
+            title: '业务规则',
+            sub: data.live ? '来自当前资产包，可被 ontology_evaluate_rules 真正求值' : '演示数据',
+            flush: true,
+          },
           h(Table, {
             columns: [
-              { key: '0', label: '规则 ID', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
-              { key: '1', label: '名称' },
-              { key: '2', label: '表达式', render: (r) => h('span', { className: 'os-mono' }, r[2]) },
-              { key: '3', label: '级别', render: (r) => h(Badge, { tone: r[3] === 'error' ? 'err' : r[3] === 'warn' ? 'warn' : '' }, r[3]) },
-              { key: '4', label: '状态', render: (r) => h(Badge, { tone: r[4] === '启用' ? 'on' : 'warn' }, r[4]) },
-              { key: '5', label: '维护人' },
+              { key: 'id', label: '规则 ID', render: (r) => h('span', { className: 'os-mono' }, r.id) },
+              { key: 'name', label: '名称' },
+              { key: 'expression', label: '表达式', render: (r) => h('span', { className: 'os-mono' }, r.expression) },
+              {
+                key: 'severity',
+                label: '级别',
+                render: (r) => h(Badge, { tone: r.severity === 'error' ? 'err' : r.severity === 'warn' ? 'warn' : '' }, r.severity),
+              },
+              { key: 'enabled', label: '状态', render: (r) => h(Badge, { tone: r.enabled ? 'on' : 'warn' }, r.enabled ? '启用' : '已停用') },
+              { key: 'owner', label: '维护人' },
             ],
-            rows: RULES.map((r) => ({ key: r[0], 0: r[0], 1: r[1], 2: r[2], 3: r[3], 4: r[4], 5: r[5] })),
+            rows: data.rules.map((r) => Object.assign({ key: r.id }, r)),
           })
         ),
         h(
           Card,
-          { title: '业务动作', sub: '动作描述业务可以做什么，以及会写到哪些对象', flush: true },
+          {
+            title: '业务动作',
+            sub: data.live ? '可执行 = 同时声明了 inputSchema 与 effect' : '演示数据',
+            flush: true,
+          },
           h(Table, {
             columns: [
-              { key: '0', label: '动作 ID', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
-              { key: '1', label: '名称' },
-              { key: '2', label: '入参', render: (r) => h('span', { className: 'os-mono' }, r[2]) },
-              { key: '3', label: '审批', render: (r) => h(Badge, { tone: r[3] === '需审批' ? 'warn' : 'on' }, r[3]) },
-              { key: '4', label: '写入对象' },
-              { key: '5', label: '版本' },
+              { key: 'id', label: '动作 ID', render: (r) => h('span', { className: 'os-mono' }, r.id) },
+              { key: 'name', label: '名称' },
+              { key: 'input', label: '入参类型', render: (r) => h('span', { className: 'os-mono' }, r.input) },
+              {
+                key: 'approvalRequired',
+                label: '审批',
+                render: (r) => h(Badge, { tone: r.approvalRequired ? 'warn' : 'on' }, r.approvalRequired ? '需审批' : '免审批'),
+              },
+              { key: 'writes', label: '写入对象' },
+              {
+                key: 'executable',
+                label: '可执行',
+                render: (r) =>
+                  h(
+                    Badge,
+                    { tone: r.executable ? 'on' : '' },
+                    r.executable ? '可执行' + (r.effects > 1 ? ' · ' + r.effects + ' effect' : '') : '仅声明'
+                  ),
+              },
             ],
-            rows: ACTIONS.map((r) => ({ key: r[0], 0: r[0], 1: r[1], 2: r[2], 3: r[3], 4: r[4], 5: r[5] })),
+            rows: data.actions.map((a) => Object.assign({ key: a.id }, a)),
           })
         ),
         h(

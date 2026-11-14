@@ -113,6 +113,7 @@ const expectations = {
   overview: ['实时资产', ir.id, '已发布'],
   ontology: ['Inventory', 'availableQty', 'belongsTo'],
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
+  logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明'],
 };
 for (const p of Object.keys(expectations)) {
   React.__setPage(p === 'overview' ? null : p);

@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.13
+## 当前状态：v0.14
 
 | 部分 | 状态 |
 | --- | --- |
@@ -23,6 +23,7 @@
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
 | Action 执行器 | ✅ 入参校验 → 审批 → 单/多 effect（赋值或增量）→ 规则回验 |
 | Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
+| 面板实时化 | ✅ 总览/本体/逻辑动作/可观测四页读真实资产（其余五页仍是演示） |
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
 | 反向建模 | ✅ 从表结构生成本体草稿：类型映射、命名归一、主键推断、关系建议、预校验 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
@@ -459,7 +460,7 @@ dsh-ontology-studio/
 | --- | --- |
 | Ontology Model Studio（对象/属性/关系/动作、多视角、影响分析） | `client.js` → `OntologyPage`，数据来自 `assets/*.ir.json` |
 | Data Studio（同步型 / 联邦型并存、字段映射） | `DataPage`（骨架演示） |
-| Logic & Action Studio（规则、函数、动作、审批闸门） | `LogicPage`（骨架演示） |
+| Logic & Action Studio（规则、函数、动作、审批闸门） | `LogicPage` 读真实 IR：规则表达式、动作审批标记、可执行性 |
 | Agent & Harness Studio（Ontology-aware 上下文与工具） | `AgentPage` + 六个 `ontology_*` 工具 |
 | App Studio（应用依赖本体而非表结构） | `AppPage`（骨架演示） |
 | Governance Center（ID/版本/责任人/审核/审计） | `GovernancePage`（骨架演示）+ `ontology_publish` 的版本状态机 |
@@ -514,7 +515,7 @@ dsh-ontology-studio/
 - **审批需要有打开的 turn**：DSH 的审批请求必须被一个进行中的回合包住；在没有 turn 的上下文里调用会失败关闭（返回 `approval: 'unavailable'`）。
 - **并发控制是单进程内的**：etag CAS 挡住「读到旧版本再覆盖」，写锁挡住同进程内的交错写；多实例共享同一目录时仍没有分布式锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
-- **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
+- **四个页面是骨架**：数据接入、应用构建、治理中心、资产市场仍是演示数据（总览、本体、逻辑动作、可观测已接真实资产）。
 - **反向建模只吃表结构**：接口文档、样例报文、现有 SQL 还生成不了草稿。
 - **上下文是静态简报，不是按任务挑选**：每次装配注入的是整个资产包的摘要，还没有「这次任务只和 Inventory 有关」的裁剪。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
