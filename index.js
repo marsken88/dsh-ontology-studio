@@ -60,6 +60,12 @@ export function apply(ctx, config = {}) {
     enabled: config.history !== false,
   });
 
+  const panel = createTraceStore({
+    file: config.panelFile ? path.resolve(config.panelFile) : path.join(path.dirname(assetsDir), '.ontology-panel.jsonl'),
+    maxLines: Number.isFinite(config.panelMaxLines) ? config.panelMaxLines : 300,
+    enabled: config.panel !== false,
+  });
+
   async function noteHistory(entry) {
     await history.append(entry);
   }
@@ -127,6 +133,7 @@ export function apply(ctx, config = {}) {
       store,
       trace,
       history,
+      panel,
       prefix: ROUTE_PREFIX,
       readOnly: writeMode === 'readonly',
       approval: approvalMode,

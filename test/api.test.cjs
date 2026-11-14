@@ -53,9 +53,22 @@ function response() {
   };
 }
 
-async function call(route, url, method = 'GET') {
+async function call(route, url, method = 'GET', body) {
   const res = response();
-  await route.handler({ method, url }, res);
+  const req = { method, url, headers: { 'user-agent': 'test' } };
+  // Minimal readable stream so readBody() can consume it.
+  const listeners = {};
+  req.on = (event, fn) => {
+    (listeners[event] = listeners[event] || []).push(fn);
+    return req;
+  };
+  req.destroy = () => {};
+  const pending = route.handler(req, res);
+  if (body !== undefined) {
+    for (const fn of listeners.data || []) fn(Buffer.from(body));
+  }
+  for (const fn of listeners.end || []) fn();
+  await pending;
   return res;
 }
 
@@ -136,6 +149,53 @@ async function call(route, url, method = 'GET') {
     const unknown = await call(routes[0], `${PREFIX}/impact?id=retail.store-inventory&object=Ghost`);
     assert.equal(unknown.statusCode, 404);
     assert.equal(unknown.json().error, 'object_not_found');
+  });
+
+  console.log('\nGET /records');
+
+  await it('返回行数与抽样，limit 生效', async () => {
+    const res = await call(routes[0], `${PREFIX}/records?id=retail.store-inventory&limit=2`);
+    assert.equal(res.statusCode, 200, res.body.slice(0, 200));
+    const body = res.json();
+    assert.equal(body.value.totalRows, 11);
+    const inv = body.value.objects.find((o) => o.id === 'Inventory');
+    assert.equal(inv.rows, 5);
+    assert.equal(inv.sample.length, 2);
+  });
+
+  await it('按对象过滤；缺参数 400；未知包 404', async () => {
+    const one = await call(routes[0], `${PREFIX}/records?id=retail.store-inventory&object=Store`);
+    assert.equal(one.statusCode, 200);
+    assert.deepEqual(one.json().value.objects.map((o) => o.id), ['Store']);
+
+    assert.equal((await call(routes[0], `${PREFIX}/records`)).statusCode, 400);
+    assert.equal((await call(routes[0], `${PREFIX}/records?id=nope`)).statusCode, 404);
+  });
+
+  console.log('\nPOST /panel-report');
+
+  await it('面板健康上报被接收并落盘', async () => {
+    const appended = [];
+    const fakePanel = { enabled: true, append: async (e) => { appended.push(e); } };
+    const alt = register(ROOT);
+    registerRoutes(alt.ctx, { store, prefix: PREFIX, panel: fakePanel });
+    const res = await call(alt.routes[0], `${PREFIX}/panel-report`, 'POST', JSON.stringify({ phase: 'render', page: 'data' }));
+    assert.equal(res.statusCode, 200);
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0].phase, 'render');
+    assert.equal(appended[0].page, 'data');
+    assert.ok(typeof appended[0].receivedAt === 'number');
+  });
+
+  await it('GET 与坏 body 分别 405 / 400', async () => {
+    const alt = register(ROOT);
+    registerRoutes(alt.ctx, { store, prefix: PREFIX, panel: { enabled: true, append: async () => {} } });
+    const wrongMethod = await call(alt.routes[0], `${PREFIX}/panel-report`, 'GET');
+    assert.equal(wrongMethod.statusCode, 405);
+
+    const badBody = await call(alt.routes[0], `${PREFIX}/panel-report`, 'POST', '{not json');
+    assert.equal(badBody.statusCode, 400);
+    assert.equal(badBody.json().error, 'bad_body');
   });
 
   console.log('\nprotocol');

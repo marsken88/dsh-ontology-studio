@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.18.1
+## 当前状态：v0.18.2
 
 | 部分 | 状态 |
 | --- | --- |
@@ -175,6 +175,15 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 ```
 
 那两条被跳过的规则不是缺陷，是**真实发现**：表达式引用了本体里没有声明的字段，说明模型和规则还没对齐。
+
+### 面板自己会报告健康状态
+
+页面渲染崩了，用户只会看到白屏，而 Agent 看不到屏幕。所以面板有两道自检：
+
+- **页面级错误边界**：某一页抛错时降级成一张错误卡片（含错误信息），不会把整个面板打空；
+- **上报**：每次切页 `POST /panel-report`，页面崩了也上报 —— 一条 `{"phase":"page-error","page":"data","error":"..."}` 落进 `.ontology-panel.jsonl`，出问题可以直接读文件，不用猜。
+
+两层都刻意做成「永不阻断渲染」：上报失败无声忽略，错误卡片始终可读。
 
 规则和动作都跑在**事实数据**上，所以给了一个直接看数据的入口：
 
@@ -456,13 +465,14 @@ ontology_export({ packageId, format: "json-schema" | "markdown", objectId? })
 | `GET /dsh-ontology-studio/traces?limit=40` | 最近的工具调用轨迹（新→旧） |
 | `GET /dsh-ontology-studio/records?id=<包id>&object=&limit=` | 事实数据的行数抽样 |
 | `GET /dsh-ontology-studio/history?id=&limit=40` | 资产包的变更历史（新→旧） |
+| `POST /dsh-ontology-studio/panel-report` | 面板上报自己的渲染健康状态（落到 .ontology-panel.jsonl） |
 
 非 GET 返回 405，未知路由 404，handler 抛错返回 500（不会让请求挂住）。面板每个 Studio 的顶栏会显示数据来源：`实时资产` / `演示数据 · 服务未连接`。
 
 ## 测试
 
 ```bash
-npm test        # 十三组，共 199 项断言
+npm test        # 十三组，共 203 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -477,7 +487,7 @@ npm test        # 十三组，共 199 项断言
 | `test/history.test.cjs` | 6 项：各类写入留痕、版本号跟随、失败不留痕、过滤与上限、关闭历史 |
 | `test/tools.test.cjs` | 21 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
-| `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
+| `test/api.test.cjs` | 19 项：六条路由、400/404/405/500、只读与审批标记、面板上报、目录缺失 |
 | `test/e2e.test.cjs` | 12 项：整条链路按真实使用顺序跑一遍（现状→建模→执行→回收→轨迹），验证各工具彼此自洽 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
 

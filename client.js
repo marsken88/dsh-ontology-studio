@@ -1905,12 +1905,74 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ *
      * panel
      * ------------------------------------------------------------------ */
+    /**
+     * Page-level error boundary. A throwing page would otherwise blank the whole
+     * slot entry; here it degrades to a readable card, and the failure is posted
+     * to the Host so it can be inspected from disk instead of guessed from a
+     * screenshot.
+     */
+    class PageBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { error: null };
+      }
+      static getDerivedStateFromError(error) {
+        return { error: error };
+      }
+      componentDidCatch(error, info) {
+        reportPanel({ phase: 'page-error', page: this.props.page, error: String(error && error.message), detail: String((info && info.componentStack) || '').slice(0, 400) });
+      }
+      componentDidUpdate(prev) {
+        if (prev.page !== this.props.page && this.state.error) this.setState({ error: null });
+      }
+      render() {
+        if (!this.state.error) return this.props.children;
+        return h(
+          'div',
+          { className: 'os-card' },
+          h(
+            'div',
+            { className: 'os-card-h' },
+            h('span', { className: 'os-card-t' }, '这个页面渲染失败'),
+            h(Badge, { tone: 'err' }, this.props.page || '—')
+          ),
+          h(
+            'div',
+            { className: 'os-card-b' },
+            h('div', { className: 'os-mono', style: { marginBottom: 8 } }, String(this.state.error.message || this.state.error)),
+            h('div', { className: 'os-muted' }, '错误已上报到宿主（.ontology-panel.jsonl）。切到别的页面再切回来可以重试。')
+          )
+        );
+      }
+    }
+
+    /** Best-effort UI health report; never blocks or throws. */
+    function reportPanel(payload) {
+      try {
+        if (typeof fetch !== 'function') return;
+        fetch(API_BASE + '/panel-report', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(Object.assign({ ts: Date.now(), href: typeof location !== 'undefined' ? location.pathname : '' }, payload)),
+        }).catch(function () {});
+      } catch (error) {
+        /* reporting must never break rendering */
+      }
+    }
+
     function OntologyStudio() {
       const [page, setPage] = useState('overview');
       const ontology = useOntologyState();
       const model = useMemo(function () {
         return buildModel(ontology);
       }, [ontology]);
+      useEffect(
+        function () {
+          reportPanel({ phase: 'render', page: page, live: model.live, problems: model.problems.length });
+        },
+        [page, model.live]
+      );
       const meta = PAGE[page] || PAGE.overview;
       const Body = PAGES[page] || OverviewPage;
       const pkgBadge = model.pkg
@@ -1974,7 +2036,11 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'os-btn', disabled: true }, '切换环境：生产'),
             h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产')
           ),
-          h('div', { className: 'os-body' }, h(Body, { model: model }))
+          h(
+            'div',
+            { className: 'os-body' },
+            h(PageBoundary, { page: page, key: page }, h(Body, { model: model }))
+          )
         )
       );
     }
