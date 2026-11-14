@@ -155,6 +155,20 @@ export function apply(ctx, config = {}) {
   /** Write tools disappear entirely in readonly mode — not a UI toggle. */
   const registerWrite = (definition) => {
     if (writeMode === 'readonly') return;
+    // Every write tool supports compare-and-swap and reports the resulting etag.
+    const params = definition.parameters || (definition.parameters = {});
+    const props = params.properties || (params.properties = {});
+    if (!props.ifEtag) {
+      props.ifEtag = {
+        type: 'string',
+        description: '可选：读取时拿到的 etag。若资产在你读取后被改动过，本次写入会被拒绝（乐观锁）',
+      };
+    }
+    const outProps = definition.output && definition.output.schema && definition.output.schema.properties;
+    if (outProps) {
+      if (!outProps.etag) outProps.etag = { type: 'string' };
+      if (!outProps.conflict) outProps.conflict = { type: 'boolean' };
+    }
     register(definition);
   };
 
@@ -345,6 +359,7 @@ export function apply(ctx, config = {}) {
       if (!args.objectId) {
         return {
           found: true,
+          etag: entry.etag,
           package: summarizeIr(ir),
           objects: (ir.objects || []).map((o) => ({
             id: o.id,
@@ -370,7 +385,7 @@ export function apply(ctx, config = {}) {
       const rules = (ir.rules || []).filter((r) =>
         [...propNames].some((n) => new RegExp(`\\b${n}\\b`).test(String(r.expression || '')))
       );
-      return { found: true, package: summarizeIr(ir), object: obj, links, rules, actions };
+      return { found: true, etag: entry.etag, package: summarizeIr(ir), object: obj, links, rules, actions };
     },
   });
 
@@ -669,14 +684,23 @@ export function apply(ctx, config = {}) {
       if (args.dryRun) {
         return { ok: true, action, objectId: args.object.id, version: ir.version, message: 'dryRun：校验通过，未写盘' };
       }
-      const saved = await store.save(entry.file, ir);
+      const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
+      if (saved.conflict) {
+        return {
+          ok: false,
+          conflict: true,
+          etag: saved.etag,
+          problems: saved.problems,
+          message: '资产已被修改，请重新读取（ontology_get）后再写入',
+        };
+      }
       return {
         ok: saved.ok,
         action,
         objectId: args.object.id,
         packageId: ir.id,
         version: ir.version,
-        file: saved.file,
+        file: saved.file, etag: saved.etag,
         problems: saved.problems,
       };
     },
@@ -743,8 +767,17 @@ export function apply(ctx, config = {}) {
       const to = bumpVersion(from, args.bump);
       ir.version = to;
       ir.status = 'published';
-      const saved = await store.save(entry.file, ir);
-      return { ok: saved.ok, from, to, file: saved.file, problems: saved.problems };
+      const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
+      if (saved.conflict) {
+        return {
+          ok: false,
+          conflict: true,
+          etag: saved.etag,
+          problems: saved.problems,
+          message: '资产已被修改，请重新读取（ontology_get）后再写入',
+        };
+      }
+      return { ok: saved.ok, from, to, file: saved.file, etag: saved.etag, problems: saved.problems };
     },
   });
 
@@ -818,8 +851,17 @@ export function apply(ctx, config = {}) {
         return { ok: false, action, linkId: args.link.id, version: ir.version, problems: check.problems, message: '写入会让本体包失效' };
       }
       if (args.dryRun) return { ok: true, action, linkId: args.link.id, version: ir.version, message: 'dryRun：校验通过，未写盘' };
-      const saved = await store.save(entry.file, ir);
-      return { ok: saved.ok, action, linkId: args.link.id, version: ir.version, file: saved.file, problems: saved.problems };
+      const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
+      if (saved.conflict) {
+        return {
+          ok: false,
+          conflict: true,
+          etag: saved.etag,
+          problems: saved.problems,
+          message: '资产已被修改，请重新读取（ontology_get）后再写入',
+        };
+      }
+      return { ok: saved.ok, action, linkId: args.link.id, version: ir.version, file: saved.file, etag: saved.etag, problems: saved.problems };
     },
   });
 
@@ -876,8 +918,17 @@ export function apply(ctx, config = {}) {
       const check = validateIr(ir);
       if (!check.ok) return { ok: false, linkId: args.linkId, problems: check.problems, message: '删除会让本体包失效' };
       if (args.dryRun) return { ok: true, linkId: args.linkId, message: 'dryRun：未写盘' };
-      const saved = await store.save(entry.file, ir);
-      return { ok: saved.ok, linkId: args.linkId, file: saved.file, problems: saved.problems };
+      const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
+      if (saved.conflict) {
+        return {
+          ok: false,
+          conflict: true,
+          etag: saved.etag,
+          problems: saved.problems,
+          message: '资产已被修改，请重新读取（ontology_get）后再写入',
+        };
+      }
+      return { ok: saved.ok, linkId: args.linkId, file: saved.file, etag: saved.etag, problems: saved.problems };
     },
   });
 
@@ -1018,13 +1069,22 @@ export function apply(ctx, config = {}) {
       if (args.dryRun) {
         return { ok: true, objectId: args.objectId, version: ir.version, cascaded, message: 'dryRun：未写盘' };
       }
-      const saved = await store.save(entry.file, ir);
+      const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
+      if (saved.conflict) {
+        return {
+          ok: false,
+          conflict: true,
+          etag: saved.etag,
+          problems: saved.problems,
+          message: '资产已被修改，请重新读取（ontology_get）后再写入',
+        };
+      }
       return {
         ok: saved.ok,
         objectId: args.objectId,
         version: ir.version,
         cascaded,
-        file: saved.file,
+        file: saved.file,etag: saved.etag,
         problems: saved.problems,
       };
     },
@@ -1181,7 +1241,20 @@ export function apply(ctx, config = {}) {
       }
 
       const recordsName = entry.file.replace(/\.ir\.json$/, '.records.json');
-      const file = await store.saveRecords(recordsName, working);
+      const savedRecords = await store.saveRecords(recordsName, working, {
+        ifEtag: args.ifEtag || (await store.readEtag(recordsName)),
+      });
+      if (savedRecords.conflict) {
+        return {
+          ok: false,
+          actionId: action.id,
+          conflict: true,
+          etag: savedRecords.etag,
+          problems: savedRecords.problems,
+          message: '事实数据已被修改，请重新读取后再执行',
+        };
+      }
+      const file = savedRecords.file;
       return {
         ok: true,
         actionId: action.id,
@@ -1193,6 +1266,7 @@ export function apply(ctx, config = {}) {
         rulesBefore: rulesReport,
         rulesAfter,
         file,
+        etag: savedRecords.etag,
       };
     },
   });
