@@ -9,3 +9,6 @@ docs/plan-source.md
 
 # 执行轨迹（每次工具调用追加一行），不入库
 .ontology-traces.jsonl
+
+# 版本历史（每次写入追加一条），不入库
+.ontology-history.jsonl

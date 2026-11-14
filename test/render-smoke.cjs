@@ -104,6 +104,10 @@ React.__setLive({
   file: '<assets>/store-inventory.ir.json',
   ir,
   error: null,
+  history: [
+    { ts: 1700000002000, packageId: ir.id, version: '1.1.0', op: 'upsert_object', target: 'Warehouse', summary: '新增对象 Warehouse' },
+    { ts: 1700000001000, packageId: ir.id, version: '1.0.0', op: 'publish', target: ir.id, summary: '发布 1.0.0 → 1.1.0' },
+  ],
   records: {
     file: '<assets>/store-inventory.records.json',
     totalRows: 11,
@@ -126,6 +130,7 @@ const expectations = {
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明'],
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行'],
+  governance: ['变更历史', 'upsert_object', 'v1.1.0'],
 };
 for (const p of Object.keys(expectations)) {
   React.__setPage(p === 'overview' ? null : p);

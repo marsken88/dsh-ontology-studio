@@ -48,6 +48,21 @@ export function apply(ctx, config = {}) {
     enabled: config.trace !== false,
   });
 
+  /**
+   * Version history of the asset package itself: one line per mutation, so
+   * "who changed what, and at which version" survives longer than the file's
+   * current contents. Same append-only JSONL mechanics as the trace.
+   */
+  const history = createTraceStore({
+    file: config.historyFile ? path.resolve(config.historyFile) : path.join(path.dirname(assetsDir), '.ontology-history.jsonl'),
+    maxLines: Number.isFinite(config.historyMaxLines) ? config.historyMaxLines : 2000,
+    enabled: config.history !== false,
+  });
+
+  async function noteHistory(entry) {
+    await history.append(entry);
+  }
+
   /** Records file for rule evaluation: `<name>.ir.json` ↔ `<name>.records.json`. */
   const recordsFileFor = (assetsFile) => path.join(assetsDir, assetsFile.replace(/\.ir\.json$/, '.records.json'));
 
@@ -110,6 +125,7 @@ export function apply(ctx, config = {}) {
     registerRoutes(webCtx, {
       store,
       trace,
+      history,
       prefix: ROUTE_PREFIX,
       readOnly: writeMode === 'readonly',
       approval: approvalMode,
@@ -839,6 +855,49 @@ export function apply(ctx, config = {}) {
   });
 
   /* ------------------------------------------------------------------ *
+   * ontology_history  (read — the package's own version history)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_history',
+    description:
+      '查看本体包的变更历史：谁在哪个版本上改了什么（新增/更新/删除对象与关系、发布、执行动作）。文件内容只反映当前状态，历史记录才是「改过什么」的答案。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '可选：只看某个资产包' },
+        limit: { type: 'number', description: '最多返回多少条（默认 20，上限 200）' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          file: { type: 'string' },
+          entries: { type: 'array' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.entries || v.entries.length === 0) return text('还没有任何变更记录。');
+        const lines = [`变更历史（${v.entries.length} 条，新→旧）：${v.file}`];
+        for (const e of v.entries) {
+          const when = new Date(e.ts).toISOString().slice(0, 19).replace('T', ' ');
+          lines.push(`${when}  v${e.version || '?'}  [${e.op}]  ${e.summary || e.target || ''}`);
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const limit = Math.max(1, Math.min(Number.isFinite(args.limit) ? args.limit : 20, 200));
+      const all = await history.list(limit * 5);
+      const filtered = args.packageId ? all.filter((e) => e.packageId === args.packageId) : all;
+      return { ok: true, file: history.file, entries: filtered.slice(0, limit) };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
    * ontology_upsert_object  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
@@ -933,6 +992,7 @@ export function apply(ctx, config = {}) {
           message: '资产已被修改，请重新读取（ontology_get）后再写入',
         };
       }
+      await noteHistory({ ts: Date.now(), packageId: ir.id, version: ir.version, op: 'upsert_object', target: args.object.id, summary: (action === 'created' ? '新增对象 ' : '更新对象 ') + args.object.id, etag: saved.etag });
       return {
         ok: saved.ok,
         action,
@@ -1016,6 +1076,7 @@ export function apply(ctx, config = {}) {
           message: '资产已被修改，请重新读取（ontology_get）后再写入',
         };
       }
+      await noteHistory({ ts: Date.now(), packageId: ir.id, version: to, op: 'publish', target: ir.id, summary: '发布 ' + from + ' → ' + to + (args.bump && args.bump !== 'patch' ? '（' + args.bump + '）' : ''), etag: saved.etag });
       return { ok: saved.ok, from, to, file: saved.file, etag: saved.etag, problems: saved.problems };
     },
   });
@@ -1100,6 +1161,7 @@ export function apply(ctx, config = {}) {
           message: '资产已被修改，请重新读取（ontology_get）后再写入',
         };
       }
+      await noteHistory({ ts: Date.now(), packageId: ir.id, version: ir.version, op: 'upsert_link', target: args.link.id, summary: (action === 'created' ? '新增关系 ' : '更新关系 ') + args.link.id, etag: saved.etag });
       return { ok: saved.ok, action, linkId: args.link.id, version: ir.version, file: saved.file, etag: saved.etag, problems: saved.problems };
     },
   });
@@ -1167,6 +1229,7 @@ export function apply(ctx, config = {}) {
           message: '资产已被修改，请重新读取（ontology_get）后再写入',
         };
       }
+      await noteHistory({ ts: Date.now(), packageId: ir.id, version: ir.version, op: 'delete_link', target: args.linkId, summary: '删除关系 ' + args.linkId, etag: saved.etag });
       return { ok: saved.ok, linkId: args.linkId, file: saved.file, etag: saved.etag, problems: saved.problems };
     },
   });
@@ -1331,6 +1394,7 @@ export function apply(ctx, config = {}) {
           message: '资产已被修改，请重新读取（ontology_get）后再写入',
         };
       }
+      await noteHistory({ ts: Date.now(), packageId: ir.id, version: ir.version, op: 'delete_object', target: args.objectId, summary: '删除对象 ' + args.objectId + (args.cascade ? '（级联清理 ' + cascaded.links + ' 关系 / ' + cascaded.actions + ' 动作）' : ''), etag: saved.etag });
       return {
         ok: saved.ok,
         objectId: args.objectId,
@@ -1512,6 +1576,7 @@ export function apply(ctx, config = {}) {
           message: '事实数据已被修改，请重新读取后再执行',
         };
       }
+      await noteHistory({ ts: Date.now(), packageId: ir.id, version: ir.version, op: 'execute_action', target: action.id, summary: '执行动作 ' + action.id + '（命中 ' + outcome.matched + ' 行，更新 ' + outcome.updated + ' 行）', etag: savedRecords.etag });
       const file = savedRecords.file;
       return {
         ok: true,

@@ -679,7 +679,7 @@ window.__ModuleLoader__.load({
     const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
 
     function useOntologyState() {
-      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null });
+      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [] });
       useEffect(function () {
         let alive = true;
         const get = function (path) {
@@ -690,7 +690,7 @@ window.__ModuleLoader__.load({
           );
         };
         if (typeof fetch !== 'function') {
-          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null });
+          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null, history: [] });
           return function () {};
         }
         get('/status')
@@ -699,7 +699,7 @@ window.__ModuleLoader__.load({
             const value = body && body.value;
             const first = value && value.packages ? value.packages.filter(function (p) { return p.ok; })[0] : null;
             if (!first) {
-              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null });
+              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null, history: [] });
               return null;
             }
             return get('/package?id=' + encodeURIComponent(first.id)).then(function (pkg) {
@@ -710,10 +710,14 @@ window.__ModuleLoader__.load({
                 get('/records?id=' + encodeURIComponent(first.id) + '&limit=3').catch(function () {
                   return { value: null };
                 }),
+                get('/history?id=' + encodeURIComponent(first.id) + '&limit=40').catch(function () {
+                  return { value: { entries: [] } };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
                 const records = (both[1] && both[1].value) || null;
+                const historyEntries = (both[2] && both[2].value && both[2].value.entries) || [];
                 setState({
                   phase: 'live',
                   value: value,
@@ -722,13 +726,14 @@ window.__ModuleLoader__.load({
                   error: null,
                   traces: entries,
                   records: records,
+                  history: historyEntries,
                 });
               });
             });
           })
           .catch(function (error) {
             if (alive) {
-              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null });
+              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null, history: [] });
             }
           });
         return function () {
@@ -813,6 +818,7 @@ window.__ModuleLoader__.load({
           approval: state.value && state.value.approval ? state.value.approval : 'destructive',
           traces: state.traces || [],
           records: state.records || null,
+          history: state.history || [],
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -831,6 +837,7 @@ window.__ModuleLoader__.load({
         approval: 'never',
         traces: [],
         records: null,
+        history: [],
         dir: null,
         file: null,
         problems: [],
@@ -1577,8 +1584,65 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function GovernancePage() {
+    function GovernanceLivePage(props) {
+      const model = props.model;
+      const entries = model.history || [];
+      const pkg = model.pkg || {};
+      const needApproval = (pkg.actions || []).filter(function (a) {
+        return a.approvalRequired === true;
+      });
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: 'v' + (pkg.version || '?'), label: '当前版本', delta: pkg.status === 'published' ? '已发布' : '草稿' }),
+          h(Stat, { value: String((pkg.objects || []).length), label: '受管对象', delta: (pkg.links || []).length + ' 条关系' }),
+          h(Stat, { value: String(needApproval.length), label: '需审批动作', delta: needApproval.map(function (a) { return a.id; }).join(', ') || '无' }),
+          h(Stat, { value: String(entries.length), label: '变更记录', delta: '来自 .ontology-history.jsonl' })
+        ),
+        h(
+          Card,
+          {
+            title: '变更历史',
+            sub: '每次写入追加一条，文件内容只反映当前状态，历史才回答「改过什么」',
+            extra: h(Badge, { tone: 'on' }, '真实记录'),
+            flush: true,
+          },
+          entries.length
+            ? h(Table, {
+                columns: [
+                  {
+                    key: 'ts',
+                    label: '时间',
+                    width: '18%',
+                    render: function (r) {
+                      return h('span', { className: 'os-mono os-muted' }, new Date(r.ts).toLocaleString());
+                    },
+                  },
+                  { key: 'version', label: '版本', width: '10%', render: function (r) { return h('span', { className: 'os-mono' }, 'v' + (r.version || '?')); } },
+                  { key: 'op', label: '操作', width: '18%', render: function (r) { return h(Badge, { tone: 'brand' }, r.op); } },
+                  { key: 'summary', label: '内容' },
+                ],
+                rows: entries.map(function (e, i) {
+                  return Object.assign({ key: i }, e);
+                }),
+              })
+            : h('div', { className: 'os-card-b os-muted' }, '还没有任何变更记录：这个包还没被改过。')
+        ),
+        h(
+          Notes,
+          null,
+          '这里只记录「资产包变了什么」。权限模型、审核流程、跨环境发布仍是演示数据——那些需要真实的身份与审批后端。'
+        )
+      );
+    }
+
+    function GovernancePage(props) {
+      const model = (props && props.model) || buildModel({ phase: 'demo' });
       const [tab, setTab] = useState('版本');
+      if (model.live && model.history && model.history.length) return h(GovernanceLivePage, { model: model });
       const body = {
         版本: h(Table, {
           columns: [

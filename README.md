@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.16
+## 当前状态：v0.17
 
 | 部分 | 状态 |
 | --- | --- |
@@ -23,8 +23,9 @@
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
 | Action 执行器 | ✅ 入参校验 → 审批 → 单/多 effect（赋值或增量）→ 规则回验 |
 | Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
-| 面板实时化 | ✅ 总览/本体/数据接入/逻辑动作/可观测五页读真实资产（其余四页仍是演示） |
+| 面板实时化 | ✅ 总览/本体/数据接入/逻辑动作/治理/可观测六页读真实资产（其余三页仍是演示） |
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
+| 版本历史 | ✅ 每次写入追加一条 JSONL，可查「改过什么、在哪个版本」 |
 | 反向建模 | ✅ 从表结构生成本体草稿：类型映射、命名归一、主键推断、关系建议、预校验 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
@@ -72,6 +73,7 @@
 | `ontology_draft_object` | 读 | 反向建模：表结构 → 本体对象草稿（只生成不写盘） |
 | `ontology_diagnostics` | 读 | 自检：版本、资产、门禁、简报、服务、轨迹一次报全 |
 | `ontology_records` | 读 | 查看事实数据：每个对象多少行、字段样例 |
+| `ontology_history` | 读 | 变更历史：谁在哪个版本改了什么 |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
 | `ontology_delete_link` | **写** | 删除一条关系 |
@@ -418,13 +420,14 @@ TransferOrder（门店调拨单），主键 transferNo
 | `GET /dsh-ontology-studio/impact?id=<包id>&object=<对象id>` | 对象影响分析 |
 | `GET /dsh-ontology-studio/traces?limit=40` | 最近的工具调用轨迹（新→旧） |
 | `GET /dsh-ontology-studio/records?id=<包id>&object=&limit=` | 事实数据的行数抽样 |
+| `GET /dsh-ontology-studio/history?id=&limit=40` | 资产包的变更历史（新→旧） |
 
 非 GET 返回 405，未知路由 404，handler 抛错返回 500（不会让请求挂住）。面板每个 Studio 的顶栏会显示数据来源：`实时资产` / `演示数据 · 服务未连接`。
 
 ## 测试
 
 ```bash
-npm test        # 十组，共 172 项断言
+npm test        # 十一组，共 178 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -435,6 +438,7 @@ npm test        # 十组，共 172 项断言
 | `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
+| `test/history.test.cjs` | 6 项：各类写入留痕、版本号跟随、失败不留痕、过滤与上限、关闭历史 |
 | `test/tools.test.cjs` | 21 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
@@ -481,7 +485,7 @@ dsh-ontology-studio/
 | Logic & Action Studio（规则、函数、动作、审批闸门） | `LogicPage` 读真实 IR：规则表达式、动作审批标记、可执行性 |
 | Agent & Harness Studio（Ontology-aware 上下文与工具） | `AgentPage` + 六个 `ontology_*` 工具 |
 | App Studio（应用依赖本体而非表结构） | `AppPage`（骨架演示） |
-| Governance Center（ID/版本/责任人/审核/审计） | `GovernancePage`（骨架演示）+ `ontology_publish` 的版本状态机 |
+| Governance Center（ID/版本/责任人/审核/审计） | `GovernancePage` 读真实变更历史；权限与审核仍是演示 |
 | Marketplace（三层资产、安装与复用） | `MarketplacePage`（骨架演示） |
 | Observability & Evaluation（Trace 与质量闭环） | `ObservabilityPage`（骨架演示） |
 
@@ -533,7 +537,7 @@ dsh-ontology-studio/
 - **审批需要有打开的 turn**：DSH 的审批请求必须被一个进行中的回合包住；在没有 turn 的上下文里调用会失败关闭（返回 `approval: 'unavailable'`）。
 - **并发控制是单进程内的**：etag CAS 挡住「读到旧版本再覆盖」，写锁挡住同进程内的交错写；多实例共享同一目录时仍没有分布式锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
-- **四个页面是骨架**：Agent & Harness、应用构建、治理中心、资产市场仍是演示数据（总览、本体、数据接入、逻辑动作、可观测已接真实资产）。
+- **三个页面是骨架**：Agent & Harness、应用构建、资产市场仍是演示数据（总览、本体、数据接入、逻辑动作、治理、可观测已接真实资产）。
 - **反向建模只吃表结构**：接口文档、样例报文、现有 SQL 还生成不了草稿。
 - **上下文是静态简报，不是按任务挑选**：每次装配注入的是整个资产包的摘要，还没有「这次任务只和 Inventory 有关」的裁剪。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
