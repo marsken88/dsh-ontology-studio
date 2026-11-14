@@ -16,6 +16,7 @@ import { registerRoutes } from './lib/api.mjs';
 import { createTraceStore, summarizeCall } from './lib/trace.mjs';
 import { evaluateRules } from './lib/rules.mjs';
 import { validateInput, applyEffect, executableActions, policiesFor } from './lib/actions.mjs';
+import { buildBrief } from './lib/context.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +49,49 @@ export function apply(ctx, config = {}) {
 
   /** Records file for rule evaluation: `<name>.ir.json` ↔ `<name>.records.json`. */
   const recordsFileFor = (assetsFile) => path.join(assetsDir, assetsFile.replace(/\.ir\.json$/, '.records.json'));
+
+  /* ------------------------------------------------------------------ *
+   * Context Engine: the ontology another agent already knows about.
+   * ------------------------------------------------------------------ */
+  const contextMode = ['off', 'brief', 'full'].includes(config.context) ? config.context : 'brief';
+  const contextMaxChars = Number.isFinite(config.contextMaxChars) ? config.contextMaxChars : 4000;
+  let briefCache = '';
+
+  async function refreshBrief() {
+    if (contextMode === 'off') return;
+    try {
+      const { entries } = await store.list();
+      const healthy = entries.filter((entry) => entry.ok && entry.ir)[0];
+      briefCache = healthy ? buildBrief(healthy.ir, { maxChars: contextMaxChars, level: contextMode }) : '';
+    } catch {
+      briefCache = '';
+    }
+  }
+
+  if (contextMode !== 'off') {
+    void refreshBrief();
+    let disposeSection;
+    ctx.inject(['systemPrompt'], (sysCtx) => {
+      disposeSection = sysCtx.systemPrompt.section({
+        name: 'ontology-studio',
+        order: 700,
+        text: () => briefCache || '（本体资产尚未加载完成；用 ontology_list 查看当前资产包。）',
+      });
+    });
+    ctx.effect(() => () => {
+      if (typeof disposeSection === 'function') disposeSection();
+    });
+  }
+
+  /** Writes change the brief, so the cache is rebuilt after every mutation. */
+  const WRITE_TOOLS = new Set([
+    'ontology_upsert_object',
+    'ontology_upsert_link',
+    'ontology_delete_object',
+    'ontology_delete_link',
+    'ontology_publish',
+    'ontology_execute_action',
+  ]);
 
   async function loadRecords(assetsFile) {
     const file = recordsFileFor(assetsFile);
@@ -101,6 +145,7 @@ export function apply(ctx, config = {}) {
             summary: summarizeCall(definition.name, args),
             error,
           });
+          if (WRITE_TOOLS.has(definition.name)) void refreshBrief();
         }
       },
     });

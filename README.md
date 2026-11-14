@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.7
+## 当前状态：v0.8
 
 | 部分 | 状态 |
 | --- | --- |
@@ -22,6 +22,7 @@
 | 规则求值 | ✅ 自有表达式求值器（不用 eval），在示例数据上真算违规 |
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
 | Action 执行器 | ✅ 入参 Schema 校验 → 审批 → 声明式副作用 → 规则回验 |
+| Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -227,6 +228,44 @@ adjustInventory：命中 1 行，更新 1 行 → assets/store-inventory.records
 
 目前只有 `adjustInventory` 同时声明了 `inputSchema` 与 `effect`；其余三个动作会被明确列出为不可执行，而不是静默跑通。
 
+## Context Engine：进对话就懂这个本体
+
+Agent 不该靠一次次调工具去试探「这里有什么」。插件通过 `ctx.systemPrompt.section()` 把一份本体简报注入系统提示：
+
+```
+## 本体上下文 · 门店-商品-库存
+资产包 `retail.store-inventory` v1.0.0（published，域 supply-chain）
+
+### 对象
+- **Inventory** 库存（7 属性，主键 storeId+skuId）
+- **Store** 门店（5 属性，主键 storeId）
+...
+
+### 规则（4 条）
+- inventory.lowStockWarning [warn] `availableQty < safetyStock`
+- inventory.autoReplenish [warn，已停用] `...
+
+### 可执行动作
+- adjustInventory 库存调整（需审批）→ 写 Inventory；入参 storeId, skuId, availableQty
+
+### 暂不可执行的动作
+- createTransfer 发起调拨（缺 inputSchema 或 effect）
+```
+
+三个设计约束：
+
+- **稳定**：同样的本体产出**逐字相同**的文本。简报每步都在提示里，一变就可能击穿 prompt 缓存；
+- **有界**：默认 4000 字符。超长时先丢掉属性明细，再截断并明确标注「已截断、可用 ontology_get 查」；
+- **自更新**：写工具执行后重建缓存，Agent 改完本体立刻看到新结构，不需要重启。
+
+```yaml
+config:
+  context: brief        # off | brief（默认）| full
+  contextMaxChars: 4000
+```
+
+这是**发现层**的 Context Engine：让 Agent 知道有什么、该用哪个工具，细节仍按需用 `ontology_get` 拉取。按任务动态挑选相关对象属于任务层，还没做。
+
 ### HTTP API（面板用）
 
 | 路由 | 返回 |
@@ -241,15 +280,16 @@ adjustInventory：命中 1 行，更新 1 行 → assets/store-inventory.records
 ## 测试
 
 ```bash
-npm test        # 七组，共 119 项断言
+npm test        # 八组，共 132 项断言
 ```
 
 | 文件 | 覆盖 |
 | --- | --- |
 | `test/ir.test.cjs` | 23 项：Schema 语义、每类错误各一条、影响分析、仓库读目录 |
+| `test/context.test.cjs` | 10 项：简报内容、级别差异、稳定逐字一致、超长降级与截断 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 19 项：入参校验、effect 声明校验、按匹配键写回、规则回验、审批拒绝不写盘 |
-| `test/tools.test.cjs` | 14 项：激活、`ctx.effect` 挂载、十一个工具端到端、只读模式只剩读工具、目录缺失降级 |
+| `test/tools.test.cjs` | 17 项：激活、`ctx.effect` 挂载、十一个工具端到端、只读模式只剩读工具、上下文段落注册与关闭、缺 systemPrompt 时照常工作 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
@@ -268,6 +308,7 @@ dsh-ontology-studio/
 │  ├─ expr.mjs / expr-lexer.mjs  # 规则表达式词法与递归下降求值（不用 eval）
 │  ├─ rules.mjs            # 规则归属推导与求值
 │  ├─ actions.mjs          # 动作入参校验与声明式副作用
+│  ├─ context.mjs          # 注入系统提示的本体简报（稳定 + 有界）
 │  ├─ trace.mjs            # 执行轨迹：追加式 JSONL，超限自动截断
 │  ├─ store.mjs            # 资产仓库：扫目录、mtime 缓存、安全写入、版本递增
 │  └─ api.mjs              # 面板用的只读 JSON 路由
@@ -314,7 +355,8 @@ dsh-ontology-studio/
 - [x] Agent 能直接读本体（`ontology_*`）
 - [x] 规则表达式求值：归属推导 + 在示例数据上算违规
 - [x] 执行轨迹：每次工具调用落一行，面板可读
-- [ ] Context Engine：按任务自动装配对象、关系、规则、可用动作
+- [x] Context Engine（发现层）：本体简报注入系统提示，Agent 不必先试探
+- [ ] Context Engine（任务层）：按当前任务自动挑选相关对象与可用动作
 - [x] Action 执行器：动作的入参校验、声明式副作用、执行与规则回验
 - [ ] 人工审批闸门串进业务动作流（现在只保护资产写入）
 
@@ -343,6 +385,7 @@ dsh-ontology-studio/
 - **无并发控制**：两个写入同时发生时后者覆盖前者，尚无 etag / 乐观锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
 - **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
+- **上下文是静态简报，不是按任务挑选**：每次装配注入的是整个资产包的摘要，还没有「这次任务只和 Inventory 有关」的裁剪。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
 - **只有一个动作真正可执行**：`adjustInventory` 声明了 `inputSchema` + `effect`，其余三个只有定义；判断标准是「有没有声明 effect」，没有的动作会被直接列出，不会假装执行。
 - **副作用只作用于示例事实数据**：动作改的是 `*.records.json`，没有回写 POS / 供应链系统。

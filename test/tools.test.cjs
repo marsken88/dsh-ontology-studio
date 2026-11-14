@@ -26,9 +26,16 @@ function fakeContext(options = {}) {
   const registered = [];
   const effects = [];
   const routes = [];
+  const sections = [];
   const webServer = {
     register(route) {
       routes.push(route);
+      return () => {};
+    },
+  };
+  const systemPrompt = {
+    section(section) {
+      sections.push(section);
       return () => {};
     },
   };
@@ -36,6 +43,7 @@ function fakeContext(options = {}) {
     registered,
     effects,
     routes,
+    sections,
     ctx: {
       tools: {
         register(definition) {
@@ -56,6 +64,9 @@ function fakeContext(options = {}) {
         if (deps.includes('webServer') && options.webServer !== false) {
           callback({ webServer });
         }
+        if (deps.includes('systemPrompt') && options.systemPrompt !== false) {
+          callback({ systemPrompt });
+        }
         return () => {};
       },
       /** Optional-service lookup, as Cordis exposes it. */
@@ -71,7 +82,7 @@ function fakeContext(options = {}) {
 
   console.log('\nactivation');
 
-  const { ctx, registered, effects } = fakeContext();
+  const { ctx, registered, effects, sections } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
   await it('apply 不抛错并注册十一个工具', () => {
@@ -92,7 +103,8 @@ function fakeContext(options = {}) {
   });
 
   await it('每个注册都挂在 ctx.effect 上（可卸载）', () => {
-    assert.equal(effects.length, 11);
+    // 11 个工具 + 1 个上下文段落的释放器
+    assert.equal(effects.length, registered.length + 1);
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 
@@ -108,8 +120,31 @@ function fakeContext(options = {}) {
     ]);
   });
 
-  await it('每个工具都有 parameters 与 output.schema/render', () => {
-    for (const def of registered) {
+  await it('注册本体上下文段落（systemPrompt section）', () => {
+    assert.equal(sections.length, 1, '默认应注册一个段落');
+    const section = sections[0];
+    assert.equal(section.name, 'ontology-studio');
+    assert.equal(typeof section.order, 'number');
+    assert.equal(typeof section.text, 'function');
+    const text = section.text();
+    assert.equal(typeof text, 'string');
+    assert.ok(text.length > 0, '简报不能为空');
+  });
+
+  await it("context: 'off' 时不注册上下文段落", () => {
+    const alt = fakeContext();
+    mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
+    assert.equal(alt.sections.length, 0);
+    assert.equal(alt.registered.length, 11, '工具仍应全部注册');
+  });
+
+  await it('没有 systemPrompt 服务时插件照常工作', () => {
+    const alt = fakeContext({ systemPrompt: false });
+    mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
+    assert.equal(alt.registered.length, 11);
+  });
+
+  await it('每个工具都有 parameters 与 output.schema/render', () => {    for (const def of registered) {
       assert.equal(typeof def.description, 'string');
       assert.ok(def.description.length > 20, def.name + ' 缺少描述');
       assert.equal(def.parameters.type, 'object');
