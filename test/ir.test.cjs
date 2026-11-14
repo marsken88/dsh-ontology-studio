@@ -125,6 +125,49 @@ function clone() {
     assert.ok(codes(validateIr(ir)).includes('empty'));
   });
 
+  console.log('\n未知字段（与 JSON Schema 的 additionalProperties: false 对齐）');
+
+  await it('对象上的拼错字段被拦下', () => {
+    const ir = clone();
+    ir.objects[0].nmae = 'x';
+    const result = validateIr(ir);
+    assert.ok(result.problems.some((p) => p.code === 'unknown-key' && p.path.includes('objects[0].nmae')));
+  });
+
+  await it('动作上的拼错字段被拦下（否则会静默丢字段）', () => {
+    const ir = clone();
+    ir.actions[0].aprovalRequired = true;
+    assert.ok(validateIr(ir).problems.some((p) => p.code === 'unknown-key'));
+  });
+
+  await it('属性 / 关系 / 规则 / 策略 / effect 的未知字段都被拦下', () => {
+    const cases = [
+      (ir) => { ir.objects[0].properties[0].tip = 'string'; },
+      (ir) => { ir.links[0].note = 'x'; },
+      (ir) => { ir.rules[0].priority = 1; },
+      (ir) => { ir.policies[0].owner = 'x'; },
+      (ir) => { ir.actions[0].effect.target = 'X'; },
+    ];
+    for (const mutate of cases) {
+      const ir = clone();
+      mutate(ir);
+      assert.ok(
+        validateIr(ir).problems.some((p) => p.code === 'unknown-key'),
+        '应当报 unknown-key：' + mutate.toString()
+      );
+    }
+  });
+
+  await it('包级未知字段被拦下，但 extensions 是允许的', () => {
+    const ir = clone();
+    ir.extensions = { custom: true };
+    assert.equal(validateIr(ir).ok, true, 'extensions 是合法扩展位');
+
+    const typo = clone();
+    typo.objectz = [];
+    assert.ok(validateIr(typo).problems.some((p) => p.code === 'unknown-key' && p.path === '$.objectz'));
+  });
+
   console.log('\nsummarizeIr');
 
   await it('统计与资产内容一致', () => {

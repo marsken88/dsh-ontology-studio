@@ -6,13 +6,13 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.10
+## 当前状态：v0.11
 
 | 部分 | 状态 |
 | --- | --- |
 | 平台骨架（八个 Studio + 统一导航） | ✅ 作为 Web GUI 的独立主面板 |
 | 统一本体 IR + 正式 JSON Schema | ✅ `assets/ontology-ir.schema.json` |
-| IR 校验器（结构 + 跨引用 + 影响分析） | ✅ `lib/ir.mjs` |
+| IR 校验器（结构 + 跨引用 + 未知字段 + 影响分析） | ✅ `lib/ir.mjs` 与 JSON Schema 严格度一致 |
 | 只读资产仓库（目录即数据源） | ✅ `lib/store.mjs` |
 | 模型编辑：对象、关系的增改删 | ✅ 五个写工具，校验门禁 + 级联策略 |
 | 版本递增与发布状态机 | ✅ `ontology_publish` |
@@ -342,12 +342,12 @@ TransferOrder（门店调拨单），主键 transferNo
 ## 测试
 
 ```bash
-npm test        # 十组，共 158 项断言
+npm test        # 十组，共 162 项断言
 ```
 
 | 文件 | 覆盖 |
 | --- | --- |
-| `test/ir.test.cjs` | 23 项：Schema 语义、每类错误各一条、影响分析、仓库读目录 |
+| `test/ir.test.cjs` | 27 项：Schema 语义、每类错误各一条、未知字段（含拼写错误）、影响分析、仓库读目录 |
 | `test/context.test.cjs` | 10 项：简报内容、级别差异、稳定逐字一致、超长降级与截断 |
 | `test/reverse.test.cjs` | 16 项：类型映射、命名归一、表名单数化、主键回退、关系推断、重复列、预校验、工具不写盘 |
 | `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
@@ -451,7 +451,6 @@ dsh-ontology-studio/
 - **并发控制是单进程内的**：etag CAS 挡住「读到旧版本再覆盖」，写锁挡住同进程内的交错写；多实例共享同一目录时仍没有分布式锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
 - **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
-- **校验器不强制 additionalProperties**：JSON Schema 里对象/关系/动作是封闭的，但代码校验器只查必填与跨引用，未知字段不会报错——两份文档的严格度还不一致。
 - **反向建模只吃表结构**：接口文档、样例报文、现有 SQL 还生成不了草稿。
 - **上下文是静态简报，不是按任务挑选**：每次装配注入的是整个资产包的摘要，还没有「这次任务只和 Inventory 有关」的裁剪。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
