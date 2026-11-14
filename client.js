@@ -679,7 +679,7 @@ window.__ModuleLoader__.load({
     const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
 
     function useOntologyState() {
-      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [] });
+      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null });
       useEffect(function () {
         let alive = true;
         const get = function (path) {
@@ -690,7 +690,7 @@ window.__ModuleLoader__.load({
           );
         };
         if (typeof fetch !== 'function') {
-          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [] });
+          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null });
           return function () {};
         }
         get('/status')
@@ -699,24 +699,36 @@ window.__ModuleLoader__.load({
             const value = body && body.value;
             const first = value && value.packages ? value.packages.filter(function (p) { return p.ok; })[0] : null;
             if (!first) {
-              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [] });
+              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null });
               return null;
             }
             return get('/package?id=' + encodeURIComponent(first.id)).then(function (pkg) {
-              return get('/traces?limit=30')
-                .catch(function () {
+              return Promise.all([
+                get('/traces?limit=30').catch(function () {
                   return { value: { entries: [] } };
-                })
-                .then(function (traceBody) {
-                  if (!alive) return;
-                  const entries = (traceBody && traceBody.value && traceBody.value.entries) || [];
-                  setState({ phase: 'live', value: value, file: pkg.value.file, ir: pkg.value.ir, error: null, traces: entries });
+                }),
+                get('/records?id=' + encodeURIComponent(first.id) + '&limit=3').catch(function () {
+                  return { value: null };
+                }),
+              ]).then(function (both) {
+                if (!alive) return;
+                const entries = (both[0] && both[0].value && both[0].value.entries) || [];
+                const records = (both[1] && both[1].value) || null;
+                setState({
+                  phase: 'live',
+                  value: value,
+                  file: pkg.value.file,
+                  ir: pkg.value.ir,
+                  error: null,
+                  traces: entries,
+                  records: records,
                 });
+              });
             });
           })
           .catch(function (error) {
             if (alive) {
-              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [] });
+              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null });
             }
           });
         return function () {
@@ -800,6 +812,7 @@ window.__ModuleLoader__.load({
           readOnly: state.value ? state.value.readOnly === true : false,
           approval: state.value && state.value.approval ? state.value.approval : 'destructive',
           traces: state.traces || [],
+          records: state.records || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -817,6 +830,7 @@ window.__ModuleLoader__.load({
         readOnly: false,
         approval: 'never',
         traces: [],
+        records: null,
         dir: null,
         file: null,
         problems: [],
@@ -1082,8 +1096,162 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function DataPage() {
+    /**
+     * Coverage of an object's declared properties across its sample rows:
+     * which properties the fact data actually fills in, and which it never has.
+     */
+    function coverageOf(object, sampleRows) {
+      const props = (object && object.properties) || [];
+      const rows = sampleRows || [];
+      return props.map(function (p) {
+        const present = rows.filter(function (row) {
+          return row[p.name] !== undefined && row[p.name] !== null;
+        }).length;
+        return {
+          name: p.name,
+          label: p.label || p.name,
+          type: p.type,
+          presence: rows.length ? Math.round((present / rows.length) * 100) : 0,
+          present: present,
+          rows: rows.length,
+        };
+      });
+    }
+
+    function DataLivePage(props) {
+      const model = props.model;
+      const records = model.records;
+      const objects = model.objects || [];
+      const withRows = records.objects.filter(function (o) {
+        return o.rows > 0;
+      });
+      const [picked, setPicked] = useState((withRows[0] || {}).id || '');
+      const current = withRows.filter(function (o) {
+        return o.id === picked;
+      })[0] || withRows[0];
+      const objectDef = objects.filter(function (o) {
+        return current && o.id === current.id;
+      })[0];
+      const coverage = current ? coverageOf(objectDef, current.sample) : [];
+      const missing = coverage.filter(function (c) {
+        return c.present === 0;
+      });
+
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: String(records.totalRows), label: '事实数据行数', delta: records.file ? records.file.split(/[\\/]/).pop() : '—' }),
+          h(Stat, { value: String(withRows.length), label: '有数据的对象', delta: objects.length + ' 个已建模' }),
+          h(Stat, { value: String(objects.length - withRows.length), label: '尚无数据的对象', delta: '规则与动作跑不到' }),
+          h(Stat, {
+            value: missing.length + ' 项',
+            label: '从未填充的属性',
+            delta: current ? current.id + ' 的 ' + coverage.length + ' 个属性' : '—',
+          })
+        ),
+        h(
+          Card,
+          { title: '事实数据', sub: records.file, extra: h(Badge, { tone: 'on' }, '真实文件') },
+          h(
+            'div',
+            { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+            withRows.map(function (o) {
+              return h(
+                'button',
+                {
+                  key: o.id,
+                  type: 'button',
+                  className: 'os-btn' + (current && o.id === current.id ? ' pri' : ''),
+                  onClick: function () {
+                    setPicked(o.id);
+                  },
+                },
+                o.id + ' · ' + o.rows + ' 行'
+              );
+            })
+          ),
+          h(
+            'div',
+            { className: 'os-note', style: { marginTop: 10 } },
+            '这是示例事实数据，规则求值与动作执行都跑在它上面。真实数据源（同步型 / 联邦型）尚未接入，本页下方的「接入策略」仍是设计说明。'
+          )
+        ),
+        h(
+          Card,
+          {
+            title: '属性覆盖 · ' + (current ? current.id : '—'),
+            sub: '本体声明的属性在事实数据里的填充情况（抽样 ' + (current ? current.sample.length : 0) + ' 行）',
+            flush: true,
+          },
+          h(Table, {
+            columns: [
+              { key: 'name', label: '属性', render: (r) => h('span', { className: 'os-mono' }, r.name) },
+              { key: 'label', label: '名称' },
+              { key: 'type', label: '类型' },
+              { key: 'present', label: '出现行数', width: '14%' },
+              {
+                key: 'presence',
+                label: '填充率',
+                width: '26%',
+                render: (r) =>
+                  h(
+                    'div',
+                    null,
+                    h(Bar, { value: r.presence, color: r.presence === 0 ? 'var(--dsw-alias-state-warn-primary)' : undefined }),
+                    h('div', { className: 'os-mono os-muted', style: { marginTop: 3 } }, r.presence + '%')
+                  ),
+              },
+            ],
+            rows: coverage.map((c) => Object.assign({ key: c.name }, c)),
+          })
+        ),
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          h(
+            Card,
+            { title: '接入策略（设计）' },
+            h(
+              'div',
+              null,
+              [
+                ['同步型', '数据加工、同步到平台管理的对象存储或索引，适合高频查询与跨源关联。'],
+                ['联邦型', '保留源系统作为事实来源，平台按需获取，适合权威主数据与低延迟写入。'],
+              ].map(function (r) {
+                return h(
+                  'div',
+                  { key: r[0], className: 'os-row', style: { alignItems: 'flex-start' } },
+                  h('span', { style: { width: 64, flex: 'none' } }, h(Badge, { tone: 'brand' }, r[0])),
+                  h('span', { className: 'os-grow os-muted' }, r[1])
+                );
+              })
+            )
+          ),
+          h(
+            Card,
+            { title: '字段映射（演示）' },
+            h(Table, {
+              columns: [
+                { key: '0', label: '源字段', render: (r) => h('span', { className: 'os-mono' }, r[0]) },
+                { key: '1', label: '本体属性', render: (r) => h('span', { className: 'os-mono' }, r[1]) },
+                { key: '2', label: '类型' },
+                { key: '3', label: '转换' },
+              ],
+              rows: MAPPING.slice(0, 6).map((m) => ({ key: m[0], 0: m[0], 1: m[1], 2: m[2], 3: m[3] })),
+            })
+          )
+        )
+      );
+    }
+
+    function DataPage(props) {
+      const model = (props && props.model) || buildModel({ phase: 'demo' });
+      // Hook order must stay stable across live/demo switches.
       const [sel, setSel] = useState(0);
+      if (model.live && model.records && model.records.objects) return h(DataLivePage, { model: model });
       const src = SOURCES[sel];
       return h(
         'div',

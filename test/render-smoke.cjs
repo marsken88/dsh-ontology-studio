@@ -104,6 +104,17 @@ React.__setLive({
   file: '<assets>/store-inventory.ir.json',
   ir,
   error: null,
+  records: {
+    file: '<assets>/store-inventory.records.json',
+    totalRows: 11,
+    objects: [
+      { id: 'Inventory', rows: 5, sample: [
+        { storeId: 'S-0213', skuId: 'SKU-1001', availableQty: 80, safetyStock: 150 },
+        { storeId: 'S-0213', skuId: 'SKU-1002', availableQty: 0, safetyStock: 20 },
+      ] },
+      { id: 'Store', rows: 2, sample: [{ storeId: 'S-0213', storeName: '人民广场店' }] },
+    ],
+  },
   traces: [
     { ts: 1700000000000, tool: 'ontology_list', ok: true, ms: 4, summary: 'ontology_list: ' },
     { ts: 1700000001000, tool: 'ontology_get', ok: false, ms: 9, summary: 'ontology_get: nope', error: '资产包不存在：nope' },
@@ -114,6 +125,7 @@ const expectations = {
   ontology: ['Inventory', 'availableQty', 'belongsTo'],
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明'],
+  data: ['事实数据', '属性覆盖', 'Inventory · 5 行'],
 };
 for (const p of Object.keys(expectations)) {
   React.__setPage(p === 'overview' ? null : p);
