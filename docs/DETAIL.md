@@ -19,6 +19,7 @@
 | `ontology_diagnostics` | 读 | 自检：版本、资产、门禁、简报、服务、轨迹一次报全 |
 | `ontology_records` | 读 | 查看事实数据的行数与字段样例 |
 | `ontology_history` | 读 | 变更历史：谁在哪个版本改了什么 |
+| `ontology_export` | 读 | 导出 JSON Schema 或 Markdown 文档（只返回内容，不写文件） |
 | `ontology_upsert_object` | 写 | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | 写 | 新增或替换一条对象关系 |
 | `ontology_delete_link` | 写 | 删除一条关系 |
@@ -35,6 +36,8 @@
 **审批闸门**：`approval` 有三档——`never` / `destructive`（默认，删除与发布需审批）/ `all`（所有写入都要审批）。需要审批时宿主调用 DSH 的审批服务，只有 `'allowed-once'` 放行，`rejected`、`cancelled`、`unavailable` 一律拒绝写盘；审批服务缺失或请求抛错同样失败关闭。
 
 **反向建模**：给一张物理表的列名/类型/注释/主键，生成可直接入库的本体对象草稿——类型映射、命名归一、表名单数化、主键推断、外键列的关系建议，并在目标包副本上预校验。确定性归一，理解交给模型；草稿不写盘，确认后用 upsert 落库。
+
+**产物**：同一份 IR 能导出 JSON Schema（draft 2020-12，含 enum/日期格式/主键标记）与 Markdown 参考文档，供其它系统与文档站直接消费；只返回内容，不替你决定落盘位置。
 
 **留痕**：每次写入追加一条记录到 .ontology-history.jsonl（操作、对象、版本、内容摘要、etag），失败的写入不留痕。治理页读它渲染版本时间线。
 

@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.17
+## 当前状态：v0.18
 
 | 部分 | 状态 |
 | --- | --- |
@@ -27,6 +27,7 @@
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
 | 版本历史 | ✅ 每次写入追加一条 JSONL，可查「改过什么、在哪个版本」 |
 | 反向建模 | ✅ 从表结构生成本体草稿：类型映射、命名归一、主键推断、关系建议、预校验 |
+| 产物导出 | ✅ IR → JSON Schema（draft 2020-12）/ Markdown 参考文档 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -74,6 +75,7 @@
 | `ontology_diagnostics` | 读 | 自检：版本、资产、门禁、简报、服务、轨迹一次报全 |
 | `ontology_records` | 读 | 查看事实数据：每个对象多少行、字段样例 |
 | `ontology_history` | 读 | 变更历史：谁在哪个版本改了什么 |
+| `ontology_export` | 读 | 导出 JSON Schema 或 Markdown 文档（只返回内容，不写文件） |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
 | `ontology_delete_link` | **写** | 删除一条关系 |
@@ -411,6 +413,39 @@ TransferOrder（门店调拨单），主键 transferNo
 
 **它不写盘。** 生成草稿 → 人/Agent 审阅 → 用 `ontology_upsert_object` 落库。反向建模最容易出的错是「看起来很合理但语义不对」，所以草稿必须过一遍人工或显式确认。
 
+## 一份 IR，两种产物
+
+规划里说「一个模型定义可以生成 API、SDK、接口文档、校验规则」。目前落地了两种，都从同一份 IR 派生：
+
+**JSON Schema**（draft 2020-12），给别的系统做记录校验：
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "retail.store-inventory/Inventory",
+  "title": "库存",
+  "type": "object",
+  "required": ["storeId", "skuId"],
+  "properties": {
+    "availableQty": { "type": "number", "title": "可售数量" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "storeId": { "type": "string", "title": "门店编号" }
+  },
+  "additionalProperties": false,
+  "x-primary-key": ["storeId", "skuId"]
+}
+```
+
+类型映射：`money → number`、`date/datetime → string + format`、`enum → string + enum`、`json → object`；`keys` 导出成 `x-primary-key`（JSON Schema 没有主键概念）。
+
+**Markdown 参考文档**：对象/属性表、关系表、规则表（标停用）、动作表（标可执行与审批）、策略列表。
+
+```bash
+ontology_export({ packageId, format: "json-schema" | "markdown", objectId? })
+```
+
+只返回内容、不写文件——落在哪里由调用方决定，插件不替人做目录决策。
+
 ### HTTP API（面板用）
 
 | 路由 | 返回 |
@@ -427,7 +462,7 @@ TransferOrder（门店调拨单），主键 transferNo
 ## 测试
 
 ```bash
-npm test        # 十一组，共 178 项断言
+npm test        # 十二组，共 187 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -438,6 +473,7 @@ npm test        # 十一组，共 178 项断言
 | `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
+| `test/export.test.cjs` | 9 项：类型映射、必填与主键、enum、money、、文档五节、动作可执行标记、工具不写盘 |
 | `test/history.test.cjs` | 6 项：各类写入留痕、版本号跟随、失败不留痕、过滤与上限、关闭历史 |
 | `test/tools.test.cjs` | 21 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |

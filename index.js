@@ -18,6 +18,7 @@ import { evaluateRules } from './lib/rules.mjs';
 import { validateInput, applyEffects, executableActions, policiesFor } from './lib/actions.mjs';
 import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
+import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -894,6 +895,67 @@ export function apply(ctx, config = {}) {
       const all = await history.list(limit * 5);
       const filtered = args.packageId ? all.filter((e) => e.packageId === args.packageId) : all;
       return { ok: true, file: history.file, entries: filtered.slice(0, limit) };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_export  (read — IR to downstream artifacts)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_export',
+    description:
+      '把本体导出成其它系统能消费的产物：json-schema（按对象生成校验用 JSON Schema，draft 2020-12）或 markdown（人读的参考文档：对象/属性/关系/规则/动作/策略）。只返回内容，不写文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        format: { type: 'string', description: 'json-schema（默认）| markdown' },
+        objectId: { type: 'string', description: 'json-schema 时可只导出一个对象' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          format: { type: 'string' },
+          content: { type: 'string' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`导出失败：${v.message || '未知原因'}`);
+        return text(`导出完成（${v.format}，${v.content.length} 字符）\n\n${v.content}`);
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      const ir = entry.ir;
+      const format = args.format === 'markdown' ? 'markdown' : 'json-schema';
+
+      if (format === 'markdown') {
+        if (args.objectId) {
+          return { ok: false, format, message: 'markdown 导出的是整包文档，不接受 objectId' };
+        }
+        return { ok: true, format, content: markdownDoc(ir) };
+      }
+
+      if (args.objectId) {
+        const object = (ir.objects || []).find((o) => o.id === args.objectId);
+        if (!object) {
+          return {
+            ok: false,
+            format,
+            message: `对象不存在：${args.objectId}。可用对象：${(ir.objects || []).map((o) => o.id).join(', ')}`,
+          };
+        }
+        return { ok: true, format, content: JSON.stringify(objectSchema(ir, object), null, 2) };
+      }
+      return { ok: true, format, content: JSON.stringify(packageSchemas(ir), null, 2) };
     },
   });
 
