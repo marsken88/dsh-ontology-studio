@@ -62,7 +62,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
 
   const ir = JSON.parse(fs.readFileSync(ASSET, 'utf8'));
   const adjust = ir.actions.find((a) => a.id === 'adjustInventory');
-  const transfer = ir.actions.find((a) => a.id === 'createTransfer');
+  const stocktake = ir.actions.find((a) => a.id === 'startStocktake');
 
   console.log('\nIR — 动作声明');
 
@@ -100,7 +100,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
   });
 
   await it('只有同时声明两者的动作才可执行', () => {
-    assert.deepEqual(executableActions(ir).map((a) => a.id), ['adjustInventory']);
+    assert.deepEqual(executableActions(ir).map((a) => a.id), ['adjustInventory', 'createTransfer']);
     assert.deepEqual(policiesFor(ir, 'createTransfer').map((p) => p.id).sort(), [
       'policy.crossRegion.transfer',
       'policy.inventory.writeApproval',
@@ -137,7 +137,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
   });
 
   await it('没有 inputSchema 的动作直接不可校验', () => {
-    const result = validateInput(transfer, {});
+    const result = validateInput(stocktake, {});
     assert.equal(result.ok, false);
     assert.equal(result.problems[0].code, 'no-schema');
   });
@@ -146,7 +146,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
 
   await it('按匹配键定位行并只改声明的字段', () => {
     const records = JSON.parse(fs.readFileSync(RECORDS, 'utf8'));
-    const outcome = applyEffect(records, adjust, { storeId: 'S-0213', skuId: 'SKU-1001', availableQty: 200 });
+    const outcome = applyEffect(records, adjust.effect, { storeId: 'S-0213', skuId: 'SKU-1001', availableQty: 200 });
     assert.equal(outcome.matched, 1);
     assert.equal(outcome.updated, 1);
     assert.deepEqual(outcome.changed, [{ before: { availableQty: 80 }, after: { availableQty: 200 } }]);
@@ -157,7 +157,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
 
   await it('值未变化时不记为更新', () => {
     const records = JSON.parse(fs.readFileSync(RECORDS, 'utf8'));
-    const outcome = applyEffect(records, adjust, { storeId: 'S-0213', skuId: 'SKU-1001', availableQty: 80 });
+    const outcome = applyEffect(records, adjust.effect, { storeId: 'S-0213', skuId: 'SKU-1001', availableQty: 80 });
     assert.equal(outcome.matched, 1);
     assert.equal(outcome.updated, 0);
     assert.deepEqual(outcome.changed, []);
@@ -165,7 +165,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
 
   await it('匹配不到行时 matched 为 0', () => {
     const records = JSON.parse(fs.readFileSync(RECORDS, 'utf8'));
-    const outcome = applyEffect(records, adjust, { storeId: 'S-9999', skuId: 'SKU-1001', availableQty: 1 });
+    const outcome = applyEffect(records, adjust.effect, { storeId: 'S-9999', skuId: 'SKU-1001', availableQty: 1 });
     assert.equal(outcome.matched, 0);
   });
 
@@ -228,12 +228,12 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
     const dir = tempAssets();
     const tools = await loadTools(dir);
     const result = await tools.ontology_execute_action.execute(
-      { packageId: 'retail.store-inventory', actionId: 'createTransfer', input: {} },
+      { packageId: 'retail.store-inventory', actionId: 'startStocktake', input: {} },
       {}
     );
     assert.equal(result.ok, false);
     assert.ok(result.message.includes('还没有可执行的声明'));
-    assert.deepEqual(result.executable, ['adjustInventory']);
+    assert.deepEqual(result.executable, ['adjustInventory', 'createTransfer']);
   });
 
   await it('匹配不到行时如实报错，不伪造成功', async () => {
@@ -295,6 +295,73 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
     const saved = readRecords(dir);
     const row = saved.objects.Inventory.find((r) => r.storeId === 'S-0188' && r.skuId === 'SKU-1004');
     assert.equal(row.availableQty, 400);
+  });
+
+  console.log('\n跨对象动作（多 effect + 增量）');
+
+  await it('createTransfer 一次改两个库存行，数量守恒', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const before = readRecords(dir);
+    const qtyOf = (records, storeId) =>
+      records.objects.Inventory.find((r) => r.storeId === storeId && r.skuId === 'SKU-1001').availableQty;
+    const fromBefore = qtyOf(before, 'S-0213');
+    const toBefore = qtyOf(before, 'S-0188');
+
+    const result = await tools.ontology_execute_action.execute(
+      {
+        packageId: 'retail.store-inventory',
+        actionId: 'createTransfer',
+        input: { fromStoreId: 'S-0213', toStoreId: 'S-0188', skuId: 'SKU-1001', qty: 50 },
+      },
+      {}
+    );
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.matched, 2, '应当命中调出与调入两行');
+    assert.equal(result.updated, 2);
+
+    const after = readRecords(dir);
+    assert.equal(qtyOf(after, 'S-0213'), fromBefore - 50, '调出门店应减少');
+    assert.equal(qtyOf(after, 'S-0188'), toBefore + 50, '调入门店应增加');
+    assert.equal(qtyOf(after, 'S-0213') + qtyOf(after, 'S-0188'), fromBefore + toBefore, '总量守恒');
+  });
+
+  await it('调出门店不存在时命中不足，不假装成功', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const result = await tools.ontology_execute_action.execute(
+      {
+        packageId: 'retail.store-inventory',
+        actionId: 'createTransfer',
+        input: { fromStoreId: 'S-0000', toStoreId: 'S-0188', skuId: 'SKU-1001', qty: 10 },
+      },
+      {}
+    );
+    // 只有调入那一侧命中
+    assert.equal(result.matched, 1);
+    assert.equal(result.updated, 1);
+    assert.equal(result.effects.find((e) => e.object === 'Inventory' && e.matched === 0) !== undefined, true);
+  });
+
+  await it('增量表达式引用未声明的入参时被校验器拦下', async () => {
+    const bad = JSON.parse(JSON.stringify(ir));
+    const action = bad.actions.find((a) => a.id === 'createTransfer');
+    action.effect[0].adjust.availableQty = '-notAnInput';
+    assert.ok(validateIr(bad).problems.some((p) => p.code === 'unknown-input-field'));
+  });
+
+  await it('对非数值字段做增量被拦下', async () => {
+    const bad = JSON.parse(JSON.stringify(ir));
+    const action = bad.actions.find((a) => a.id === 'adjustInventory');
+    action.effect.adjust = { storeId: 'qty' };
+    assert.ok(validateIr(bad).problems.some((p) => p.code === 'non-numeric-adjust'));
+  });
+
+  await it('effect 既没有 set 也没有 adjust 时被拦下', async () => {
+    const bad = JSON.parse(JSON.stringify(ir));
+    const action = bad.actions.find((a) => a.id === 'adjustInventory');
+    delete action.effect.set;
+    assert.ok(validateIr(bad).problems.some((p) => p.code === 'no-operation'));
   });
 
   const total = pass + failures.length;

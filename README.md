@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.11
+## 当前状态：v0.12
 
 | 部分 | 状态 |
 | --- | --- |
@@ -21,7 +21,7 @@
 | 逐次人工审批 | ✅ 写操作调用 Host 审批服务，非 `allowed-once` 一律失败关闭 |
 | 规则求值 | ✅ 自有表达式求值器（不用 eval），在示例数据上真算违规 |
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
-| Action 执行器 | ✅ 入参 Schema 校验 → 审批 → 声明式副作用 → 规则回验 |
+| Action 执行器 | ✅ 入参校验 → 审批 → 单/多 effect（赋值或增量）→ 规则回验 |
 | Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
 | 反向建模 | ✅ 从表结构生成本体草稿：类型映射、命名归一、主键推断、关系建议、预校验 |
@@ -229,6 +229,41 @@ adjustInventory：命中 1 行，更新 1 行 → assets/store-inventory.records
 
 `matched === 0` 时返回失败并说明匹配键，不伪造成功——「Agent 说成功了」和「真的改了」是两件事，这一步就是拿后者卡前者。
 
+### 跨对象动作：一次调用改多行
+
+`effect` 可以是一个对象，也可以是数组。数组按顺序应用，每项自己声明 `matchKeys` 和改法。`matchKeys` 的每一项可以是字段名，也可以是 `{ field, from }`——用来处理「入参叫 `fromStoreId`、目标行上叫 `storeId`」这种错位。
+
+动作的改法有两种：
+
+| 写法 | 含义 |
+| --- | --- |
+| `set` | 直接赋入参的值 |
+| `adjust` | 按表达式做增量，例如 `"-qty"`、`"qty * -1"`（表达式同样走安全求值器，只能引用入参字段） |
+
+`createTransfer` 就是跨对象动作：
+
+```json
+"effect": [
+  { "object": "Inventory",
+    "matchKeys": [{ "field": "storeId", "from": "fromStoreId" }, { "field": "skuId", "from": "skuId" }],
+    "adjust": { "availableQty": "-qty" } },
+  { "object": "Inventory",
+    "matchKeys": [{ "field": "storeId", "from": "toStoreId" }, { "field": "skuId", "from": "skuId" }],
+    "adjust": { "availableQty": "qty" } }
+]
+```
+
+实测一次调拨 50 件：
+
+```
+调拨前: S-0213:80  S-0188:95
+调拨后: S-0213:30  S-0188:145      ← 总量守恒，没多也没少
+```
+
+只有一侧命中（比如调出门店不存在）时，工具如实报告 `matched: 1` 并在 `effects` 里给出每项的命中数，不假装整笔成功。
+
+删除对象时会连带清理指向它的 effect 条目——多 effect 的动作保留其余项，`writes` 里不再有对象的动作整条删除。
+
 目前只有 `adjustInventory` 同时声明了 `inputSchema` 与 `effect`；其余三个动作会被明确列出为不可执行，而不是静默跑通。
 
 ## Context Engine：进对话就懂这个本体
@@ -342,7 +377,7 @@ TransferOrder（门店调拨单），主键 transferNo
 ## 测试
 
 ```bash
-npm test        # 十组，共 162 项断言
+npm test        # 十组，共 167 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -352,7 +387,7 @@ npm test        # 十组，共 162 项断言
 | `test/reverse.test.cjs` | 16 项：类型映射、命名归一、表名单数化、主键回退、关系推断、重复列、预校验、工具不写盘 |
 | `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
-| `test/actions.test.cjs` | 19 项：入参校验、effect 声明校验、按匹配键写回、规则回验、审批拒绝不写盘 |
+| `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
 | `test/tools.test.cjs` | 17 项：激活、`ctx.effect` 挂载、十二个工具端到端、只读模式只剩六个读工具、上下文段落注册与关闭、缺 systemPrompt 时照常工作 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
@@ -423,7 +458,8 @@ dsh-ontology-studio/
 - [x] Context Engine（发现层）：本体简报注入系统提示，Agent 不必先试探
 - [ ] Context Engine（任务层）：按当前任务自动挑选相关对象与可用动作
 - [x] Action 执行器：动作的入参校验、声明式副作用、执行与规则回验
-- [ ] 人工审批闸门串进业务动作流（现在只保护资产写入）
+- [x] 人工审批闸门串进业务动作流
+- [x] 跨对象动作：一次调用改多行（调拨 = 调出扣减 + 调入增加）
 
 **阶段三 · 资产与生态**
 - [ ] Asset Registry：依赖声明、影响分析、安装与升级

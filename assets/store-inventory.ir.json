@@ -115,7 +115,37 @@
         "set": { "availableQty": "availableQty" }
       }
     },
-    { "id": "createTransfer", "name": "发起调拨", "input": "TransferRequest", "approvalRequired": true, "writes": ["Order", "Inventory"] },
+    {
+      "id": "createTransfer",
+      "name": "发起调拨",
+      "input": "TransferRequest",
+      "inputSchema": [
+        { "name": "fromStoreId", "label": "调出门店", "type": "string", "required": true },
+        { "name": "toStoreId", "label": "调入门店", "type": "string", "required": true },
+        { "name": "skuId", "label": "SKU 编号", "type": "string", "required": true },
+        { "name": "qty", "label": "调拨数量", "type": "integer", "required": true }
+      ],
+      "approvalRequired": true,
+      "writes": ["Order", "Inventory"],
+      "effect": [
+        {
+          "object": "Inventory",
+          "matchKeys": [
+            { "field": "storeId", "from": "fromStoreId" },
+            { "field": "skuId", "from": "skuId" }
+          ],
+          "adjust": { "availableQty": "-qty" }
+        },
+        {
+          "object": "Inventory",
+          "matchKeys": [
+            { "field": "storeId", "from": "toStoreId" },
+            { "field": "skuId", "from": "skuId" }
+          ],
+          "adjust": { "availableQty": "qty" }
+        }
+      ]
+    },
     { "id": "startStocktake", "name": "发起盘点", "input": "StocktakeRequest", "approvalRequired": false, "writes": ["Inventory"] },
     { "id": "createReplenishment", "name": "生成补货建议", "input": "ReplenishmentRequest", "approvalRequired": true, "writes": ["Order"] }
   ],

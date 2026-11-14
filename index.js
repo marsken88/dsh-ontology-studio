@@ -15,7 +15,7 @@ import { impactOf, summarizeIr, validateIr } from './lib/ir.mjs';
 import { registerRoutes } from './lib/api.mjs';
 import { createTraceStore, summarizeCall } from './lib/trace.mjs';
 import { evaluateRules } from './lib/rules.mjs';
-import { validateInput, applyEffect, executableActions, policiesFor } from './lib/actions.mjs';
+import { validateInput, applyEffects, executableActions, policiesFor } from './lib/actions.mjs';
 import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 
@@ -1106,13 +1106,26 @@ export function apply(ctx, config = {}) {
       const droppedActions = [];
       ir.actions = (ir.actions || [])
         .map((a) => {
-          if (!(a.writes || []).includes(args.objectId)) return a;
+          const writesObject = (a.writes || []).includes(args.objectId);
+          if (!writesObject) return a;
           const writes = a.writes.filter((w) => w !== args.objectId);
+          // An effect that targets the deleted object can no longer be applied;
+          // drop those entries (multi-effect actions may keep the rest).
+          let effect = a.effect;
+          if (Array.isArray(a.effect)) {
+            const kept = a.effect.filter((e) => e && e.object !== args.objectId);
+            effect = kept.length ? kept : undefined;
+          } else if (a.effect && a.effect.object === args.objectId) {
+            effect = undefined;
+          }
           if (writes.length === 0) {
             droppedActions.push(a.id);
             return null;
           }
-          return Object.assign({}, a, { writes });
+          const next = Object.assign({}, a, { writes });
+          if (effect === undefined) delete next.effect;
+          else next.effect = effect;
+          return next;
         })
         .filter(Boolean);
 
@@ -1189,6 +1202,7 @@ export function apply(ctx, config = {}) {
           matched: { type: 'number' },
           updated: { type: 'number' },
           changed: { type: 'array' },
+          effects: { type: 'array' },
           rulesBefore: { type: 'object' },
           rulesAfter: { type: 'object' },
           problems: { type: 'array' },
@@ -1234,7 +1248,7 @@ export function apply(ctx, config = {}) {
       }
 
       const runnable = executableActions(ir);
-      if (!action.effect || !Array.isArray(action.inputSchema) || action.inputSchema.length === 0) {
+      if (!executableActions(ir).some((a) => a.id === action.id)) {
         return {
           ok: false,
           actionId: action.id,
@@ -1269,17 +1283,20 @@ export function apply(ctx, config = {}) {
 
       const before = evaluateRules(ir, loaded.records).summary;
       const working = JSON.parse(JSON.stringify(loaded.records));
-      const outcome = applyEffect(working, action, validation.value);
+      const outcome = applyEffects(working, action, validation.value);
       const after = evaluateRules(ir, working).summary;
 
       if (outcome.matched === 0) {
+        const targets = (outcome.effects || [])
+          .map((e) => `${e.object}（${e.matched} 行）`)
+          .join('、');
         return {
           ok: false,
           actionId: action.id,
           approval: gate.outcome,
           approvalRequired,
           matched: 0,
-          message: `没有匹配到任何 ${action.effect.object} 记录（匹配键：${action.effect.matchKeys.map((k) => k + '=' + JSON.stringify(validation.value[k])).join(', ')}）`,
+          message: `没有匹配到任何记录：${targets || '无副作用目标'}；入参 ${JSON.stringify(validation.value)}`,
         };
       }
 
@@ -1304,6 +1321,8 @@ export function apply(ctx, config = {}) {
           matched: outcome.matched,
           updated: outcome.updated,
           changed: outcome.changed,
+        effects: outcome.effects,
+          effects: outcome.effects,
           rulesBefore: rulesReport,
           rulesAfter,
           message: 'dryRun：未写盘',
@@ -1333,6 +1352,7 @@ export function apply(ctx, config = {}) {
         matched: outcome.matched,
         updated: outcome.updated,
         changed: outcome.changed,
+        effects: outcome.effects,
         rulesBefore: rulesReport,
         rulesAfter,
         file,

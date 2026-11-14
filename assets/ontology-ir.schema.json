@@ -98,22 +98,51 @@
         },
         "approvalRequired": { "type": "boolean" },
         "writes": { "type": "array", "items": { "type": "string" } },
-        "effect": { "$ref": "#/$defs/effect" }
+        "effect": {
+          "oneOf": [
+            { "$ref": "#/$defs/effect" },
+            { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/effect" } }
+          ],
+          "description": "一个或多个声明式副作用，按顺序应用"
+        }
       }
     },
     "effect": {
       "type": "object",
-      "description": "动作对事实数据的声明式副作用：按 matchKeys 定位行，再按 set 把入参值写进字段。不含任意代码。",
-      "required": ["object", "matchKeys", "set"],
+      "description": "动作对事实数据的声明式副作用：按 matchKeys 定位行，再按 set 赋值 / adjust 做增量。增量是只含入参字段的算术表达式，不含任意代码。",
+      "required": ["object", "matchKeys"],
       "additionalProperties": false,
       "properties": {
         "object": { "type": "string" },
-        "matchKeys": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "matchKeys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "required": ["field", "from"],
+                "additionalProperties": false,
+                "properties": {
+                  "field": { "type": "string", "description": "目标对象上的属性名" },
+                  "from": { "type": "string", "description": "入参里的字段名" }
+                }
+              }
+            ]
+          }
+        },
         "set": {
           "type": "object",
           "minProperties": 1,
           "additionalProperties": { "type": "string" },
-          "description": "对象字段 → 入参字段名"
+          "description": "对象字段 → 入参字段名（直接赋值）"
+        },
+        "adjust": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string" },
+          "description": "对象字段 → 增量表达式，例如 \"-qty\" 或 \"qty * -1\""
         }
       }
     },
