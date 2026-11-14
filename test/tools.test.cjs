@@ -4,6 +4,8 @@
  * asset directory. Run `node test/tools.test.cjs`.
  */
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
@@ -85,7 +87,7 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects, sections } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册十三个工具', () => {
+  await it('apply 不抛错并注册十四个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_delete_link',
@@ -98,6 +100,7 @@ function fakeContext(options = {}) {
       'ontology_impact',
       'ontology_list',
       'ontology_publish',
+      'ontology_records',
       'ontology_upsert_link',
       'ontology_upsert_object',
       'ontology_validate',
@@ -110,7 +113,7 @@ function fakeContext(options = {}) {
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 
-  await it("writeMode: 'readonly' 时只注册七个读工具", () => {
+  await it("writeMode: 'readonly' 时只注册八个读工具", () => {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, writeMode: 'readonly', trace: false });
     assert.deepEqual(alt.registered.map((d) => d.name).sort(), [
@@ -120,6 +123,7 @@ function fakeContext(options = {}) {
       'ontology_get',
       'ontology_impact',
       'ontology_list',
+      'ontology_records',
       'ontology_validate',
     ]);
   });
@@ -139,13 +143,13 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 13, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 14, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 13);
+    assert.equal(alt.registered.length, 14);
   });
 
   await it('ontology_diagnostics 报出版本、配置与检查项', async () => {
@@ -174,10 +178,11 @@ function fakeContext(options = {}) {
     const writeCheck = value.checks.find((c) => c.name === '写入能力');
     assert.equal(writeCheck.status, 'warn');
     assert.ok(writeCheck.detail.includes('只读'));
-    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('7 个'));
+    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('8 个'));
   });
 
-  await it('每个工具都有 parameters 与 output.schema/render', () => {    for (const def of registered) {
+  await it('每个工具都有 parameters 与 output.schema/render', () => {
+    for (const def of registered) {
       assert.equal(typeof def.description, 'string');
       assert.ok(def.description.length > 20, def.name + ' 缺少描述');
       assert.equal(def.parameters.type, 'object');
@@ -290,6 +295,43 @@ function fakeContext(options = {}) {
     const validated = await list.ontology_validate.execute({}, {});
     assert.equal(validated.ok, false);
     assert.equal(validated.problems[0].code, 'missing-dir');
+  });
+
+  await it('ontology_records 报出行数与样例，能按对象过滤', async () => {
+    const all = await byName.ontology_records.execute({ packageId: 'retail.store-inventory' }, {});
+    assert.equal(all.ok, true);
+    assert.equal(all.totalRows, 11);
+    assert.ok(all.objects.length >= 3);
+    const rendered = byName.ontology_records.output.render({}, all);
+    assert.ok(rendered[0].text.includes('11 行'));
+
+    const one = await byName.ontology_records.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Inventory', limit: 2 },
+      {}
+    );
+    assert.equal(one.objects.length, 1);
+    assert.equal(one.objects[0].id, 'Inventory');
+    assert.equal(one.objects[0].rows, 5);
+    assert.equal(one.objects[0].sample.length, 2, 'limit 应生效');
+    assert.equal(one.objects[0].sample[0].skuId, 'SKU-1001');
+  });
+
+  await it('ontology_records 对未知对象与缺数据文件给出明确错误', async () => {
+    const ghost = await byName.ontology_records.execute(
+      { packageId: 'retail.store-inventory', objectId: 'Ghost' },
+      {}
+    );
+    assert.equal(ghost.ok, false);
+    assert.ok(ghost.message.includes('Inventory'));
+
+    const alt = fakeContext();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ontology-norec-'));
+    fs.copyFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), path.join(dir, 'store-inventory.ir.json'));
+    mod.apply(alt.ctx, { assetsDir: dir, trace: false });
+    const tool = alt.registered.find((d) => d.name === 'ontology_records');
+    const missing = await tool.execute({ packageId: 'retail.store-inventory' }, {});
+    assert.equal(missing.ok, false);
+    assert.ok(missing.message.includes('示例数据'));
   });
 
   const total = pass + failures.length;

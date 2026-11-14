@@ -771,6 +771,74 @@ export function apply(ctx, config = {}) {
   });
 
   /* ------------------------------------------------------------------ *
+   * ontology_records  (read — the fact data actions run against)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_records',
+    description:
+      '查看本体包对应的示例事实数据（*.records.json）：每个对象有多少行、字段样例。规则求值与动作执行都跑在这份数据上，用它确认「我说的那行数据到底长什么样」，不要凭规则结论反推数据。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        objectId: { type: 'string', description: '可选：只看一个对象的行' },
+        limit: { type: 'number', description: '每个对象最多返回多少行（默认 5，上限 50）' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          file: { type: 'string' },
+          totalRows: { type: 'number' },
+          objects: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`读取失败：${v.message || '未知原因'}`);
+        const lines = [`事实数据：${v.totalRows} 行（${v.file}）`];
+        for (const obj of v.objects || []) {
+          lines.push(`${obj.id}：${obj.rows} 行`);
+          for (const row of obj.sample || []) lines.push('  ' + JSON.stringify(row));
+          if (obj.rows > (obj.sample || []).length) lines.push(`  …还有 ${obj.rows - obj.sample.length} 行`);
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      if (args.objectId && !(entry.ir.objects || []).some((o) => o.id === args.objectId)) {
+        return {
+          ok: false,
+          message: `对象不存在：${args.objectId}。可用对象：${(entry.ir.objects || []).map((o) => o.id).join(', ')}`,
+        };
+      }
+      const loaded = await loadRecords(entry.file);
+      if (!loaded.records) return { ok: false, file: loaded.file, message: loaded.problems.join('；') };
+
+      const limit = Math.max(1, Math.min(Number.isFinite(args.limit) ? args.limit : 5, 50));
+      const all = loaded.records.objects || {};
+      const ids = args.objectId ? [args.objectId] : Object.keys(all);
+      const objects = ids.map((id) => {
+        const rows = Array.isArray(all[id]) ? all[id] : [];
+        return { id, rows: rows.length, sample: rows.slice(0, limit) };
+      });
+      return {
+        ok: true,
+        file: loaded.file,
+        totalRows: Object.keys(all).reduce((n, key) => n + (Array.isArray(all[key]) ? all[key].length : 0), 0),
+        objects,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
    * ontology_upsert_object  (write)
    * ------------------------------------------------------------------ */
   registerWrite({

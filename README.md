@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.14
+## 当前状态：v0.15
 
 | 部分 | 状态 |
 | --- | --- |
@@ -71,6 +71,7 @@
 | `ontology_evaluate_rules` | 读 | 用示例数据真正求值业务规则，返回违规行与不可解析规则 |
 | `ontology_draft_object` | 读 | 反向建模：表结构 → 本体对象草稿（只生成不写盘） |
 | `ontology_diagnostics` | 读 | 自检：版本、资产、门禁、简报、服务、轨迹一次报全 |
+| `ontology_records` | 读 | 查看事实数据：每个对象多少行、字段样例 |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
 | `ontology_delete_link` | **写** | 删除一条关系 |
@@ -170,6 +171,22 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 ```
 
 那两条被跳过的规则不是缺陷，是**真实发现**：表达式引用了本体里没有声明的字段，说明模型和规则还没对齐。
+
+规则和动作都跑在**事实数据**上，所以给了一个直接看数据的入口：
+
+```
+ontology_records({ packageId, objectId: "Inventory", limit: 2 })
+```
+
+```
+事实数据：11 行（assets/store-inventory.records.json）
+Inventory：5 行
+  {"storeId":"S-0213","skuId":"SKU-1001","availableQty":80,"safetyStock":150,…}
+  {"storeId":"S-0213","skuId":"SKU-1002","availableQty":0,"safetyStock":20,…}
+  …还有 3 行
+```
+
+规则说「有 3 行低于安全库存」时，可以直接看那 3 行到底长什么样，而不是凭结论反推数据。
 
 求值器是手写的词法 + 递归下降（`lib/expr.mjs`、`lib/expr-lexer.mjs`），**不用 `eval`、不用 `Function`**：函数调用、赋值、分号、花括号全部是语法错误，资产文件里塞不进可执行代码。
 
@@ -400,13 +417,14 @@ TransferOrder（门店调拨单），主键 transferNo
 | `GET /dsh-ontology-studio/package?id=<包id>` | 完整 IR + 该文件的问题列表 |
 | `GET /dsh-ontology-studio/impact?id=<包id>&object=<对象id>` | 对象影响分析 |
 | `GET /dsh-ontology-studio/traces?limit=40` | 最近的工具调用轨迹（新→旧） |
+| `GET /dsh-ontology-studio/records?id=<包id>&object=&limit=` | 事实数据的行数抽样 |
 
 非 GET 返回 405，未知路由 404，handler 抛错返回 500（不会让请求挂住）。面板每个 Studio 的顶栏会显示数据来源：`实时资产` / `演示数据 · 服务未连接`。
 
 ## 测试
 
 ```bash
-npm test        # 十组，共 169 项断言
+npm test        # 十组，共 172 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -417,7 +435,7 @@ npm test        # 十组，共 169 项断言
 | `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
-| `test/tools.test.cjs` | 19 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
+| `test/tools.test.cjs` | 21 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
