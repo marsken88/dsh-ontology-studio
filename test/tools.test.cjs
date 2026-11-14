@@ -85,11 +85,12 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects, sections } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册十二个工具', () => {
+  await it('apply 不抛错并注册十三个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_delete_link',
       'ontology_delete_object',
+      'ontology_diagnostics',
       'ontology_draft_object',
       'ontology_evaluate_rules',
       'ontology_execute_action',
@@ -109,10 +110,11 @@ function fakeContext(options = {}) {
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 
-  await it("writeMode: 'readonly' 时只注册六个读工具", () => {
+  await it("writeMode: 'readonly' 时只注册七个读工具", () => {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, writeMode: 'readonly', trace: false });
     assert.deepEqual(alt.registered.map((d) => d.name).sort(), [
+      'ontology_diagnostics',
       'ontology_draft_object',
       'ontology_evaluate_rules',
       'ontology_get',
@@ -137,13 +139,42 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 12, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 13, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 12);
+    assert.equal(alt.registered.length, 13);
+  });
+
+  await it('ontology_diagnostics 报出版本、配置与检查项', async () => {
+    const alt = fakeContext();
+    mod.apply(alt.ctx, { assetsDir: path.join(ROOT, 'assets'), trace: false, approval: 'all' });
+    const tool = alt.registered.find((d) => d.name === 'ontology_diagnostics');
+    assert.ok(tool, '应当注册 ontology_diagnostics');
+    const value = await tool.execute({}, {});
+    assert.equal(value.ok, true, JSON.stringify(value.checks));
+    assert.match(value.version, /^\d+\.\d+\.\d+$/, '版本应当来自 package.json');
+    assert.equal(value.config.approval, 'all');
+    assert.equal(value.config.writeMode, 'open');
+    assert.equal(value.config.context, 'brief');
+    const names = value.checks.map((c) => c.name);
+    for (const expected of ['资产目录', '资产包', '写入能力', '上下文简报', '工具注册', '执行轨迹']) {
+      assert.ok(names.includes(expected), '缺少检查项：' + expected);
+    }
+    assert.ok(value.checks.every((c) => ['ok', 'warn', 'fail'].includes(c.status)));
+  });
+
+  await it('readonly 模式下自检如实报告只读', async () => {
+    const alt = fakeContext();
+    mod.apply(alt.ctx, { assetsDir: path.join(ROOT, 'assets'), trace: false, writeMode: 'readonly' });
+    const tool = alt.registered.find((d) => d.name === 'ontology_diagnostics');
+    const value = await tool.execute({}, {});
+    const writeCheck = value.checks.find((c) => c.name === '写入能力');
+    assert.equal(writeCheck.status, 'warn');
+    assert.ok(writeCheck.detail.includes('只读'));
+    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('7 个'));
   });
 
   await it('每个工具都有 parameters 与 output.schema/render', () => {    for (const def of registered) {

@@ -120,6 +120,8 @@ export function apply(ctx, config = {}) {
    * Every tool is wrapped once: the trace records what ran, whether it
    * succeeded and how long it took. Tracing never fails a call.
    */
+  const registeredTools = [];
+
   const register = (definition) => {
     const wrapped = Object.assign({}, definition, {
       execute: async (args, exec) => {
@@ -150,6 +152,7 @@ export function apply(ctx, config = {}) {
         }
       },
     });
+    registeredTools.push(definition.name);
     ctx.effect(() => ctx.tools.register(wrapped));
   };
 
@@ -665,6 +668,104 @@ export function apply(ctx, config = {}) {
         problems: draft.problems,
         valid: validation.ok,
         validationProblems: validation.problems,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_diagnostics  (read — "is this installation actually wired?")
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_diagnostics',
+    description:
+      '自检：报告当前加载的插件版本、资产目录与资产包状态、写入门禁与审批档位、上下文简报是否就绪、可选的宿主服务（approval / systemPrompt / webServer）是否存在、执行轨迹是否可写。刚装完或刚重启后先跑它，比逐个工具试错快。',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          version: { type: 'string' },
+          config: { type: 'object' },
+          checks: { type: 'array' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        const lines = [`本体工作台 v${v.version || '?'} 自检：${v.ok ? '正常' : '有问题需要处理'}`];
+        for (const check of v.checks || []) {
+          const mark = check.status === 'ok' ? '✓' : check.status === 'warn' ? '!' : '✗';
+          lines.push(`${mark} ${check.name}：${check.detail}`);
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async () => {
+      const checks = [];
+      const add = (name, status, detail) => checks.push({ name, status, detail });
+
+      let version = 'unknown';
+      try {
+        const pkg = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8'));
+        version = pkg.version;
+      } catch (error) {
+        add('插件版本', 'warn', `读不到 package.json：${error.message}`);
+      }
+
+      const { entries, missingDir } = await store.list();
+      if (missingDir) {
+        add('资产目录', 'fail', `不存在：${store.dir}`);
+      } else {
+        add('资产目录', 'ok', `${store.dir}（${entries.length} 个资产包）`);
+      }
+      const healthy = entries.filter((e) => e.ok);
+      if (entries.length === 0) add('资产包', 'warn', '目录里没有 *.ir.json');
+      else if (healthy.length !== entries.length) {
+        add('资产包', 'fail', `${entries.length - healthy.length} 个未通过校验，用 ontology_validate 看详情`);
+      } else add('资产包', 'ok', `${healthy.length} 个全部通过校验`);
+
+      add(
+        '写入能力',
+        writeMode === 'readonly' ? 'warn' : 'ok',
+        writeMode === 'readonly' ? '只读模式：写工具未注册' : `可写（审批档位 ${approvalMode}）`
+      );
+
+      if (contextMode === 'off') {
+        add('上下文简报', 'warn', 'context: off，未注入系统提示');
+      } else if (briefCache) {
+        add('上下文简报', 'ok', `${briefCache.length} 字符，已就绪`);
+      } else {
+        add('上下文简报', 'warn', '尚未生成（初次装配或没有可用资产包）');
+      }
+
+      add('工具注册', 'ok', `${registeredTools.length} 个（${writeMode === 'readonly' ? '只读' : '读写'}）：${registeredTools.join(', ')}`);
+
+      for (const [name, service] of [
+        ['approval', ctx.get('approval')],
+        ['systemPrompt', ctx.get('systemPrompt')],
+        ['webServer', ctx.get('webServer')],
+      ]) {
+        add(`服务 ${name}`, service ? 'ok' : 'warn', service ? '可用' : '不可用（相关能力降级）');
+      }
+
+      if (trace.enabled) {
+        try {
+          await trace.append({ ts: Date.now(), tool: 'ontology_diagnostics', ok: true, ms: 0, summary: '自检探针', error: null });
+          const recent = await trace.list(1);
+          add('执行轨迹', recent.length ? 'ok' : 'warn', `${trace.file}（可写）`);
+        } catch (error) {
+          add('执行轨迹', 'fail', `不可写：${error.message}`);
+        }
+      } else {
+        add('执行轨迹', 'warn', 'trace: false，已关闭');
+      }
+
+      const failing = checks.filter((c) => c.status === 'fail');
+      return {
+        ok: failing.length === 0,
+        version,
+        config: { writeMode, approval: approvalMode, context: contextMode, contextMaxChars, assetsDir: store.dir },
+        checks,
       };
     },
   });

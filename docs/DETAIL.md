@@ -16,6 +16,7 @@
 | `ontology_impact` | 读 | 对某个对象做影响分析：下游关系、规则、动作、审批策略 |
 | `ontology_evaluate_rules` | 读 | 用示例数据真正求值业务规则，返回违规行与不可解析的规则 |
 | `ontology_draft_object` | 读 | 反向建模：表结构 → 本体对象草稿（只生成不写盘） |
+| `ontology_diagnostics` | 读 | 自检：版本、资产、门禁、简报、服务、轨迹一次报全 |
 | `ontology_upsert_object` | 写 | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | 写 | 新增或替换一条对象关系 |
 | `ontology_delete_link` | 写 | 删除一条关系 |

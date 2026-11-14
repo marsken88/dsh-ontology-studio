@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.12
+## 当前状态：v0.13
 
 | 部分 | 状态 |
 | --- | --- |
@@ -69,6 +69,7 @@
 | `ontology_impact` | 读 | 对象影响分析：下游关系、规则、动作、审批策略 |
 | `ontology_evaluate_rules` | 读 | 用示例数据真正求值业务规则，返回违规行与不可解析规则 |
 | `ontology_draft_object` | 读 | 反向建模：表结构 → 本体对象草稿（只生成不写盘） |
+| `ontology_diagnostics` | 读 | 自检：版本、资产、门禁、简报、服务、轨迹一次报全 |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
 | `ontology_delete_link` | **写** | 删除一条关系 |
@@ -330,6 +331,33 @@ node test/concurrency.test.cjs   # 10 项
 
 边界：这是**单进程内**的保护。多个 DSH 实例共享同一资产目录时没有分布式锁——那需要外部协调（文件租约或数据库），不在当前范围。
 
+## 装好没装好，一次调用确认
+
+重启之后先跑这个：
+
+```
+ontology_diagnostics
+```
+
+```
+本体工作台 v0.13.0 自检：正常
+✓ 资产目录：…/assets（1 个资产包）
+✓ 资产包：1 个全部通过校验
+✓ 写入能力：可写（审批档位 destructive）
+✓ 上下文简报：1209 字符，已就绪
+✓ 工具注册：13 个（读写）：ontology_list, ontology_get, …
+✓ 服务 approval：可用
+✓ 执行轨迹：…/.ontology-traces.jsonl（可写）
+```
+
+三个用途：
+
+- **确认加载的是新代码**：版本来自 `package.json`。宿主不会热重载宿主半，如果这里显示的是旧版本号，说明还需要重启——光看「工具有没有」是看不出来的，旧的 6 个工具也在；
+- **确认可选服务**：`approval` / `systemPrompt` / `webServer` 缺任何一个，对应能力会静默降级（写入不再要审批、没有本体简报、面板读不到数据），自检会点名；
+- **确认资产健康**：目录、包数量、校验状态、轨迹可写性一次报全。
+
+有 `fail` 项时 `ok` 就是 `false`；`warn` 只是降级，不阻止使用。
+
 ## 反向建模：表结构 → 本体草稿
 
 规划文档里的 AI 反向建模，我把它拆成两半：**理解交给模型，归一化交给平台**。`ontology_draft_object` 做后一半——它是确定性的，同样的表永远产出同样的草稿。
@@ -377,7 +405,7 @@ TransferOrder（门店调拨单），主键 transferNo
 ## 测试
 
 ```bash
-npm test        # 十组，共 167 项断言
+npm test        # 十组，共 169 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -388,7 +416,7 @@ npm test        # 十组，共 167 项断言
 | `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
-| `test/tools.test.cjs` | 17 项：激活、`ctx.effect` 挂载、十二个工具端到端、只读模式只剩六个读工具、上下文段落注册与关闭、缺 systemPrompt 时照常工作 |
+| `test/tools.test.cjs` | 19 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
