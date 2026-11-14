@@ -85,11 +85,12 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects, sections } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册十一个工具', () => {
+  await it('apply 不抛错并注册十二个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_delete_link',
       'ontology_delete_object',
+      'ontology_draft_object',
       'ontology_evaluate_rules',
       'ontology_execute_action',
       'ontology_get',
@@ -108,10 +109,11 @@ function fakeContext(options = {}) {
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 
-  await it("writeMode: 'readonly' 时只注册五个读工具", () => {
+  await it("writeMode: 'readonly' 时只注册六个读工具", () => {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, writeMode: 'readonly', trace: false });
     assert.deepEqual(alt.registered.map((d) => d.name).sort(), [
+      'ontology_draft_object',
       'ontology_evaluate_rules',
       'ontology_get',
       'ontology_impact',
@@ -135,13 +137,13 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 11, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 12, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 11);
+    assert.equal(alt.registered.length, 12);
   });
 
   await it('每个工具都有 parameters 与 output.schema/render', () => {    for (const def of registered) {

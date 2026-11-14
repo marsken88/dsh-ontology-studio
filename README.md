@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.9
+## 当前状态：v0.10
 
 | 部分 | 状态 |
 | --- | --- |
@@ -24,6 +24,7 @@
 | Action 执行器 | ✅ 入参 Schema 校验 → 审批 → 声明式副作用 → 规则回验 |
 | Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
+| 反向建模 | ✅ 从表结构生成本体草稿：类型映射、命名归一、主键推断、关系建议、预校验 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -67,6 +68,7 @@
 | `ontology_validate` | 读 | 校验结构与跨引用，返回带路径的问题列表 |
 | `ontology_impact` | 读 | 对象影响分析：下游关系、规则、动作、审批策略 |
 | `ontology_evaluate_rules` | 读 | 用示例数据真正求值业务规则，返回违规行与不可解析规则 |
+| `ontology_draft_object` | 读 | 反向建模：表结构 → 本体对象草稿（只生成不写盘） |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
 | `ontology_delete_link` | **写** | 删除一条关系 |
@@ -293,6 +295,39 @@ node test/concurrency.test.cjs   # 10 项
 
 边界：这是**单进程内**的保护。多个 DSH 实例共享同一资产目录时没有分布式锁——那需要外部协调（文件租约或数据库），不在当前范围。
 
+## 反向建模：表结构 → 本体草稿
+
+规划文档里的 AI 反向建模，我把它拆成两半：**理解交给模型，归一化交给平台**。`ontology_draft_object` 做后一半——它是确定性的，同样的表永远产出同样的草稿。
+
+```
+输入 dwd_transfer_order（门店调拨单表）
+  transfer_no   varchar(32)  调拨单号  PK
+  from_store_id bigint       调出门店
+  to_store_id   bigint       调入门店
+  qty           int          调拨数量  NOT NULL
+  status        enum('draft','approved','done')
+                ↓
+TransferOrder（门店调拨单），主键 transferNo
+  - transferNo : string 必填    - qty : integer 必填
+  - fromStoreId : integer      - status : enum [draft/approved/done]
+  - toStoreId : integer
+关系建议：transfer_order_from_store_references_store → Store
+          transfer_order_to_store_references_store   → Store
+预校验：并入后整包仍然合法
+```
+
+做了这些归一：
+
+| 环节 | 规则 |
+| --- | --- |
+| 类型映射 | `decimal` → money、`timestamp` → datetime、`tinyint(1)` → boolean、`enum(...)` 解析出取值；认不出的类型降级 string 并**明确标注原类型** |
+| 命名 | 列名 snake_case → camelCase（`SKU_CODE` → `skuCode`；已有驼峰保持原样）；表名去 `dwd_`/`dim_`/`ods_` 等前缀并单数化（`ads_sales` → `Sale`） |
+| 主键 | 优先 `primaryKey` 标记，其次 `id` 列，都没有就**报问题而不是猜** |
+| 关系 | `*_id` 列按对象名匹配，支持限定词（`fromStoreId` → Store）；指向未知对象不硬造 |
+| 预校验 | 草稿并入目标包副本后跑一遍校验，直接告诉你「能不能入库」 |
+
+**它不写盘。** 生成草稿 → 人/Agent 审阅 → 用 `ontology_upsert_object` 落库。反向建模最容易出的错是「看起来很合理但语义不对」，所以草稿必须过一遍人工或显式确认。
+
 ### HTTP API（面板用）
 
 | 路由 | 返回 |
@@ -307,17 +342,18 @@ node test/concurrency.test.cjs   # 10 项
 ## 测试
 
 ```bash
-npm test        # 九组，共 142 项断言
+npm test        # 十组，共 158 项断言
 ```
 
 | 文件 | 覆盖 |
 | --- | --- |
 | `test/ir.test.cjs` | 23 项：Schema 语义、每类错误各一条、影响分析、仓库读目录 |
 | `test/context.test.cjs` | 10 项：简报内容、级别差异、稳定逐字一致、超长降级与截断 |
+| `test/reverse.test.cjs` | 16 项：类型映射、命名归一、表名单数化、主键回退、关系推断、重复列、预校验、工具不写盘 |
 | `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 19 项：入参校验、effect 声明校验、按匹配键写回、规则回验、审批拒绝不写盘 |
-| `test/tools.test.cjs` | 17 项：激活、`ctx.effect` 挂载、十一个工具端到端、只读模式只剩读工具、上下文段落注册与关闭、缺 systemPrompt 时照常工作 |
+| `test/tools.test.cjs` | 17 项：激活、`ctx.effect` 挂载、十二个工具端到端、只读模式只剩六个读工具、上下文段落注册与关闭、缺 systemPrompt 时照常工作 |
 | `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 15 项：四条路由、400/404/405/500、只读与审批标记、目录缺失 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
@@ -337,6 +373,7 @@ dsh-ontology-studio/
 │  ├─ rules.mjs            # 规则归属推导与求值
 │  ├─ actions.mjs          # 动作入参校验与声明式副作用
 │  ├─ context.mjs          # 注入系统提示的本体简报（稳定 + 有界）
+│  ├─ reverse.mjs          # 反向建模：表结构 → 本体草稿
 │  ├─ trace.mjs            # 执行轨迹：追加式 JSONL，超限自动截断
 │  ├─ store.mjs            # 资产仓库：扫目录、mtime 缓存、安全写入、版本递增
 │  └─ api.mjs              # 面板用的只读 JSON 路由
@@ -394,7 +431,8 @@ dsh-ontology-studio/
 - [ ] 应用生成：由本体元数据生成页面与表单
 
 **阶段四 · 智能化运营**
-- [ ] AI 反向建模（从表结构/接口/文档生成初始本体）
+- [x] 反向建模（表结构 → 本体草稿）：确定性归一，理解交给模型
+- [ ] 从接口文档 / 样例报文生成草稿（现在只吃表结构）
 - [ ] 自动影响分析与回归测试生成
 - [ ] Agent 效果评测与自动优化
 
@@ -413,6 +451,8 @@ dsh-ontology-studio/
 - **并发控制是单进程内的**：etag CAS 挡住「读到旧版本再覆盖」，写锁挡住同进程内的交错写；多实例共享同一目录时仍没有分布式锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
 - **五个 Studio 是骨架**：数据接入、逻辑动作、应用构建、治理、市场、可观测仍是演示数据。
+- **校验器不强制 additionalProperties**：JSON Schema 里对象/关系/动作是封闭的，但代码校验器只查必填与跨引用，未知字段不会报错——两份文档的严格度还不一致。
+- **反向建模只吃表结构**：接口文档、样例报文、现有 SQL 还生成不了草稿。
 - **上下文是静态简报，不是按任务挑选**：每次装配注入的是整个资产包的摘要，还没有「这次任务只和 Inventory 有关」的裁剪。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
 - **只有一个动作真正可执行**：`adjustInventory` 声明了 `inputSchema` + `effect`，其余三个只有定义；判断标准是「有没有声明 effect」，没有的动作会被直接列出，不会假装执行。

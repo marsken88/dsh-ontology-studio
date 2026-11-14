@@ -17,6 +17,7 @@ import { createTraceStore, summarizeCall } from './lib/trace.mjs';
 import { evaluateRules } from './lib/rules.mjs';
 import { validateInput, applyEffect, executableActions, policiesFor } from './lib/actions.mjs';
 import { buildBrief } from './lib/context.mjs';
+import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -595,6 +596,75 @@ export function apply(ctx, config = {}) {
         summary: evaluation.summary,
         results,
         skipped: evaluation.skipped,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_draft_object  (read — generates, never writes)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_draft_object',
+    description:
+      '反向建模：给一张物理表的描述（列名、类型、注释、主键），生成可直接入库的本体对象草稿——类型映射、命名归一、主键推断、外键列的关系建议，并在目标包副本上预校验。本工具只生成不写入；确认后用 ontology_upsert_object 落库。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '要并入哪个资产包（用于关系推断与预校验）' },
+        table: {
+          type: 'object',
+          description: '{ name, comment?, columns: [{ name, type, comment?, nullable?, primaryKey? }] }',
+        },
+      },
+      required: ['packageId', 'table'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          object: { type: 'object' },
+          links: { type: 'array' },
+          problems: { type: 'array' },
+          valid: { type: 'boolean' },
+          validationProblems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`生成失败：${v.message || '未知原因'}`);
+        const obj = v.object;
+        const lines = [
+          `草稿对象 ${obj.id}（${obj.name}）：${obj.properties.length} 个属性，主键 ${(obj.keys || []).join('+') || '未识别'}`,
+          ...obj.properties.map((p) => `  - ${p.name}${p.label ? '（' + p.label + '）' : ''}: ${p.type}${p.required ? ' 必填' : ''}${p.enum ? ' [' + p.enum.join('/') + ']' : ''}`),
+          v.links && v.links.length ? `关系建议：${v.links.map((l) => `${l.id} → ${l.target}`).join(', ')}` : '关系建议：无',
+          v.valid ? '预校验：并入后整包仍然合法' : `预校验：并入后不合法（${(v.validationProblems || []).length} 个问题）`,
+          ...(v.problems || []).map((p) => `注意 [${p.code}] ${p.message}`),
+          '确认后用 ontology_upsert_object 落库（本工具不写盘）。',
+        ];
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) {
+        return { ok: false, message: `资产包不存在：${args.packageId}` };
+      }
+      const draft = draftObjectFromTable(args.table, entry.ir);
+      if (!draft.object) {
+        return { ok: false, problems: draft.problems, message: (draft.problems[0] || {}).message || '无法生成' };
+      }
+      const check = validateDraft(entry.ir, draft);
+      const validation = validateIr(JSON.parse(JSON.stringify(check.candidate)));
+      return {
+        ok: true,
+        object: draft.object,
+        links: draft.links,
+        problems: draft.problems,
+        valid: validation.ok,
+        validationProblems: validation.problems,
       };
     },
   });
