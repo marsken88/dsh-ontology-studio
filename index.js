@@ -807,7 +807,7 @@ export function apply(ctx, config = {}) {
         const v = value || {};
         if (v.ok) {
           return text(
-            `${v.action === 'created' ? '已新增' : '已更新'}对象 ${v.objectId}（${v.packageId} v${v.version}）→ ${v.file}`
+            `${v.action === 'created' ? '已新增' : '已更新'}对象 ${v.objectId}（${v.packageId || '—'} v${v.version}）→ ${v.file || 'dryRun 未写盘'}`
           );
         }
         return text(
@@ -853,7 +853,7 @@ export function apply(ctx, config = {}) {
         };
       }
       if (args.dryRun) {
-        return { ok: true, action, objectId: args.object.id, version: ir.version, message: 'dryRun：校验通过，未写盘' };
+        return { ok: true, action, objectId: args.object.id, packageId: ir.id, version: ir.version, file: null, message: 'dryRun：校验通过，未写盘' };
       }
       const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
       if (saved.conflict) {
@@ -1021,7 +1021,7 @@ export function apply(ctx, config = {}) {
       if (!check.ok) {
         return { ok: false, action, linkId: args.link.id, version: ir.version, problems: check.problems, message: '写入会让本体包失效' };
       }
-      if (args.dryRun) return { ok: true, action, linkId: args.link.id, version: ir.version, message: 'dryRun：校验通过，未写盘' };
+      if (args.dryRun) return { ok: true, action, linkId: args.link.id, version: ir.version, file: null, message: 'dryRun：校验通过，未写盘' };
       const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
       if (saved.conflict) {
         return {

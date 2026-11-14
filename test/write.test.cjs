@@ -204,6 +204,28 @@ function readPackage(dir) {
     assert.equal(afterText, beforeText);
   });
 
+  await it('dryRun 的渲染不出现 undefined（真机首跑踩过）', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const result = await tools.ontology_upsert_object.execute(
+      {
+        packageId: 'retail.store-inventory',
+        object: {
+          id: 'Warehouse',
+          name: '仓库',
+          keys: ['warehouseId'],
+          properties: [{ name: 'warehouseId', type: 'string', required: true }],
+        },
+        dryRun: true,
+      },
+      {}
+    );
+    const rendered = tools.ontology_upsert_object.output.render({}, result)[0].text;
+    assert.ok(!rendered.includes('undefined'), '渲染里不能出现 undefined：' + rendered);
+    assert.ok(rendered.includes('retail.store-inventory'), '应当带上资产包 id：' + rendered);
+    assert.ok(rendered.includes('dryRun'), '应当说明未写盘：' + rendered);
+  });
+
   await it('不存在的包直接报错', async () => {
     const dir = tempAssets();
     const tools = await loadTools(dir);
