@@ -17,6 +17,23 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'dsh-ontology-studio';
     const API_BASE = '/dsh-ontology-studio';
 
+    /**
+     * POST helper for panel writes. Resolves with the response body even on 4xx,
+     * because a validation failure is information the form has to show.
+     */
+    function post(path, body) {
+      return fetch(API_BASE + path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body || {}),
+      }).then(function (response) {
+        return response.json().catch(function () {
+          return { ok: false, message: 'HTTP ' + response.status };
+        });
+      });
+    }
+
     /* ------------------------------------------------------------------ *
      * styles — theme tokens only, so light/dark follow the host
      * ------------------------------------------------------------------ */
@@ -1033,11 +1050,319 @@ window.__ModuleLoader__.load({
 
     const VIEWS = ['业务视角', '数据视角', '技术视角', 'AI 视角'];
 
+
+    /** Types the IR accepts; keep in sync with assets/ontology-ir.schema.json. */
+    var PROPERTY_TYPES = ['string', 'number', 'integer', 'money', 'boolean', 'date', 'datetime', 'enum', 'json'];
+
+    function blankObject() {
+      return {
+        id: '',
+        name: '',
+        description: '',
+        keys: [],
+        properties: [{ name: 'id', label: '编号', type: 'string', required: true }],
+      };
+    }
+
+    /** The IR object, not the view model: the editor must save what the file holds. */
+    function rawObject(model, id) {
+      const pkg = model && model.pkg;
+      const found = pkg && Array.isArray(pkg.objects) ? pkg.objects.filter(function (o) { return o.id === id; })[0] : null;
+      return found ? JSON.parse(JSON.stringify(found)) : null;
+    }
+
+    /**
+     * Inline editor for one object. Saving goes to the panel write route, which
+     * validates the whole package and returns the validator's own problems, so
+     * the form can show exactly what is wrong instead of a generic failure.
+     */
+    function ObjectEditor(props) {
+      const [draft, setDraft] = useState(props.initial ? JSON.parse(JSON.stringify(props.initial)) : blankObject());
+      const [busy, setBusy] = useState(false);
+      const [problems, setProblems] = useState([]);
+      const [confirmDelete, setConfirmDelete] = useState(false);
+      const isNew = !props.initial;
+
+      const patch = function (field, value) {
+        const next = JSON.parse(JSON.stringify(draft));
+        next[field] = value;
+        setDraft(next);
+      };
+      const patchProperty = function (index, field, value) {
+        const next = JSON.parse(JSON.stringify(draft));
+        next.properties[index][field] = value;
+        setDraft(next);
+      };
+      const addProperty = function () {
+        const next = JSON.parse(JSON.stringify(draft));
+        next.properties.push({ name: '', label: '', type: 'string', required: false });
+        setDraft(next);
+      };
+      const removeProperty = function (index) {
+        const next = JSON.parse(JSON.stringify(draft));
+        next.properties.splice(index, 1);
+        setDraft(next);
+      };
+
+      const save = function () {
+        if (busy) return;
+        setBusy(true);
+        setProblems([]);
+        // Drop empty rows so a half-filled line does not fail validation.
+        const clean = JSON.parse(JSON.stringify(draft));
+        clean.properties = (clean.properties || []).filter(function (p) {
+          return String(p.name || '').trim() !== '';
+        });
+        clean.keys = (clean.keys || []).filter(function (k) {
+          return clean.properties.some(function (p) {
+            return p.name === k;
+          });
+        });
+        if (!clean.keys.length && clean.properties.length) clean.keys = [clean.properties[0].name];
+
+        post('/write/save-object', { packageId: props.packageId, object: clean })
+          .then(function (body) {
+            if (body && body.ok) {
+              props.onDone();
+              return;
+            }
+            setProblems((body && body.problems) || [{ message: (body && (body.message || body.error)) || '保存失败' }]);
+          })
+          .catch(function (error) {
+            setProblems([{ message: String(error && error.message) }]);
+          })
+          .then(function () {
+            setBusy(false);
+          });
+      };
+
+      const remove = function () {
+        if (busy) return;
+        setBusy(true);
+        setProblems([]);
+        post('/write/delete-object', { packageId: props.packageId, objectId: draft.id, cascade: props.cascade })
+          .then(function (body) {
+            if (body && body.ok) {
+              props.onDone();
+              return;
+            }
+            if (body && body.error === 'has_dependents') {
+              const d = body.dependents || {};
+              setProblems([
+                {
+                  message:
+                    '这个对象还被引用：' +
+                    (d.links || 0) +
+                    ' 条关系' +
+                    ((d.actions || []).length ? '、动作 ' + d.actions.join(', ') : '') +
+                    ((d.agents || []).length ? '、Agent ' + d.agents.join(', ') : '') +
+                    '。勾选「连带清理」后再删。',
+                },
+              ]);
+              setConfirmDelete(true);
+              return;
+            }
+            setProblems((body && body.problems) || [{ message: (body && (body.message || body.error)) || '删除失败' }]);
+          })
+          .catch(function (error) {
+            setProblems([{ message: String(error && error.message) }]);
+          })
+          .then(function () {
+            setBusy(false);
+          });
+      };
+
+      const field = function (label, value, onChange, placeholder) {
+        return h(
+          'label',
+          { className: 'os-field' },
+          h('span', { className: 'os-field-l' }, label),
+          h('input', {
+            className: 'os-input',
+            value: value || '',
+            placeholder: placeholder || '',
+            onChange: function (event) {
+              onChange(event.target.value);
+            },
+          })
+        );
+      };
+
+      return h(
+        Card,
+        {
+          title: isNew ? '新建对象' : '编辑 ' + (draft.name || draft.id),
+          sub: '保存前会按整个资产包校验，错误直接显示在下面',
+          extra: h(
+            'button',
+            {
+              type: 'button',
+              className: 'os-btn',
+              onClick: function () {
+                props.onCancel();
+              },
+            },
+            '取消'
+          ),
+        },
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          field('对象 ID（PascalCase）', draft.id, function (v) {
+            patch('id', v);
+          }, 'Warehouse'),
+          field('中文名称', draft.name, function (v) {
+            patch('name', v);
+          }, '区域仓')
+        ),
+        field('说明', draft.description, function (v) {
+          patch('description', v);
+        }, '这个对象代表什么'),
+        h(
+          'div',
+          { style: { marginTop: 12, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 } },
+          h('span', { style: { fontWeight: 600 } }, '属性'),
+          h('span', { className: 'os-muted' }, '主键默认取第一个属性'),
+          h('span', { className: 'os-grow' }),
+          h(
+            'button',
+            { type: 'button', className: 'os-btn', onClick: addProperty },
+            '+ 添加属性'
+          )
+        ),
+        h(Table, {
+          columns: [
+            {
+              key: 'name',
+              label: '字段名',
+              render: function (r) {
+                return h('input', {
+                  className: 'os-input',
+                  value: r.p.name,
+                  placeholder: 'warehouseNo',
+                  onChange: function (event) {
+                    patchProperty(r.index, 'name', event.target.value);
+                  },
+                });
+              },
+            },
+            {
+              key: 'label',
+              label: '中文名',
+              render: function (r) {
+                return h('input', {
+                  className: 'os-input',
+                  value: r.p.label || '',
+                  placeholder: '仓库编号',
+                  onChange: function (event) {
+                    patchProperty(r.index, 'label', event.target.value);
+                  },
+                });
+              },
+            },
+            {
+              key: 'type',
+              label: '类型',
+              width: '16%',
+              render: function (r) {
+                return h(
+                  'select',
+                  {
+                    className: 'os-input',
+                    value: r.p.type,
+                    onChange: function (event) {
+                      patchProperty(r.index, 'type', event.target.value);
+                    },
+                  },
+                  PROPERTY_TYPES.map(function (t) {
+                    return h('option', { key: t, value: t }, t);
+                  })
+                );
+              },
+            },
+            {
+              key: 'required',
+              label: '必填',
+              width: '10%',
+              render: function (r) {
+                return h('input', {
+                  type: 'checkbox',
+                  checked: r.p.required === true,
+                  onChange: function (event) {
+                    patchProperty(r.index, 'required', event.target.checked);
+                  },
+                });
+              },
+            },
+            {
+              key: 'ops',
+              label: '',
+              width: '10%',
+              render: function (r) {
+                return h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'os-btn',
+                    onClick: function () {
+                      removeProperty(r.index);
+                    },
+                  },
+                  '删除'
+                );
+              },
+            },
+          ],
+          rows: (draft.properties || []).map(function (p, index) {
+            return { key: index, index: index, p: p };
+          }),
+        }),
+        problems.length
+          ? h(
+              'div',
+              { className: 'os-card-b', style: { marginTop: 10 } },
+              problems.map(function (p, i) {
+                return h(
+                  'div',
+                  { key: i, className: 'os-row' },
+                  h(Badge, { tone: 'err' }, p.code || '错误'),
+                  h('span', { className: 'os-grow' }, (p.path ? p.path + ' — ' : '') + (p.message || ''))
+                );
+              })
+            )
+          : null,
+        h(
+          'div',
+          { style: { marginTop: 14, display: 'flex', gap: 8, alignItems: 'center' } },
+          h(
+            'button',
+            { type: 'button', className: 'os-btn pri', onClick: save, disabled: busy },
+            busy ? '保存中…' : '保存'
+          ),
+          isNew
+            ? null
+            : h(
+                'button',
+                { type: 'button', className: 'os-btn', onClick: remove, disabled: busy },
+                confirmDelete ? '确认连带删除' : '删除对象'
+              ),
+          h('span', { className: 'os-grow' }),
+          h('span', { className: 'os-muted' }, '面板上的改动是人工操作，不走 Agent 审批；写入仍会过整包校验')
+        )
+      );
+    }
+
     function OntologyPage(props) {
       const model = props.model || buildModel({ phase: 'demo' });
       const objects = model.objects && model.objects.length ? model.objects : OBJECTS;
       const [sel, setSel] = useState('Inventory');
       const [view, setView] = useState(VIEWS[0]);
+      const [editing, setEditing] = useState(null);
+      const packageId = model && model.pkg ? model.pkg.id : null;
+      const reloadAfterWrite = function () {
+        setEditing(null);
+        if (typeof props.onSaved === 'function') props.onSaved();
+      };
       const obj = objects.filter((o) => o.id === sel)[0] || objects[0];
 
       const rows = obj.props.map((p) => {
@@ -1066,7 +1391,18 @@ window.__ModuleLoader__.load({
         { className: 'os-split' },
         h(
           Card,
-          { title: '对象清单', sub: objects.length + ' 个', flush: true },
+          {
+            title: '对象清单',
+            sub: objects.length + ' 个',
+            extra: packageId
+              ? h(
+                  'button',
+                  { type: 'button', className: 'os-btn', onClick: function () { setEditing('new'); } },
+                  '+ 新建对象'
+                )
+              : null,
+            flush: true,
+          },
           h(
             'div',
             { style: { padding: '4px 0 6px' } },
@@ -1082,12 +1418,35 @@ window.__ModuleLoader__.load({
                   },
                 },
                 h('div', { className: 'os-rowhead' }, h('span', { className: 'os-li-t' }, o.name), o.status === '草稿' ? h(Badge, { tone: 'warn' }, '草稿') : null),
-                h('div', { className: 'os-li-s' }, o.id + ' · ' + o.props.length + ' 属性')
+                h('div', { className: 'os-li-s' }, o.id + ' · ' + o.props.length + ' 属性'),
+                packageId
+                  ? h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'os-btn',
+                        onClick: function (event) {
+                          event.stopPropagation();
+                          setEditing(o.id);
+                        },
+                      },
+                      '编辑'
+                    )
+                  : null
               )
             )
           )
         ),
-        h(
+        editing && packageId
+          ? h(ObjectEditor, {
+              packageId: packageId,
+              initial: editing === 'new' ? null : rawObject(model, editing),
+              onDone: reloadAfterWrite,
+              onCancel: function () {
+                setEditing(null);
+              },
+            })
+          : h(
           'div',
           { className: 'os-grid' },
           h(

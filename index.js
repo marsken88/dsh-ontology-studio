@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises';
 import { createStore, bumpVersion } from './lib/store.mjs';
 import { impactOf, summarizeIr, validateIr } from './lib/ir.mjs';
 import { registerRoutes } from './lib/api.mjs';
+import { registerWriteRoutes } from './lib/panel-writes.mjs';
 import { createTraceStore, summarizeCall } from './lib/trace.mjs';
 import { evaluateRules, ruleWarnings } from './lib/rules.mjs';
 import { validateInput, applyEffects, executableActions, policiesFor } from './lib/actions.mjs';
@@ -30,7 +31,7 @@ import { focusOf, messageText } from './lib/focus.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.29.1';
+const CODE_VERSION = '0.30.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -191,6 +192,12 @@ export function apply(ctx, config = {}) {
 
   /* The panel is a separate process; it reads the same store over HTTP. */
   ctx.inject(['webServer'], (webCtx) => {
+    registerWriteRoutes(webCtx, {
+      store,
+      prefix: ROUTE_PREFIX,
+      writeMode,
+      noteHistory,
+    });
     registerRoutes(webCtx, {
       store,
       trace,

@@ -297,7 +297,7 @@ async function call(route, url, method = 'GET', body) {
     const call = (url) =>
       new Promise((resolve) => {
         const res = { writeHead: (code) => { res.code = code; }, end: (body) => resolve({ code: res.code, body: JSON.parse(body || '{}') }) };
-        routes[0].handler({ method: 'GET', url, headers: {}, on() { return this; }, destroy() {} }, res);
+        routes[routes.length - 1].handler({ method: 'GET', url, headers: {}, on() { return this; }, destroy() {} }, res);
       });
 
     const ok = await call('/dsh-ontology-studio/evaluate?id=retail.store-inventory');

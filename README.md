@@ -1,5 +1,7 @@
 # Ontology Studio
 
+> **怎么用**：[USAGE.md](USAGE.md) —— 面板点选 / Agent 对话，两种改法写的是同一份文件。
+
 [![test](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml/badge.svg)](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml)
 
 企业级 Ontology + Harness 平台的落地工程。目标不是做一个「本体建模页面」，而是：
@@ -8,7 +10,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.29.1
+## 当前状态：v0.30
 
 | 部分 | 状态 |
 | --- | --- |
@@ -25,6 +27,7 @@
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
 | Action 执行器 | ✅ 入参校验 → 审批 → 单/多 effect（赋值或增量）→ 规则回验 |
 | Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
+| 可视化定义 | ✅ 面板可直接新建/编辑/删除对象，保存前按整包校验并回显问题 |
 | 面板实时化 | ✅ 九个页面全部读真实资产 |
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
 | 版本历史 | ✅ 每次写入追加一条 JSONL，可查「改过什么、在哪个版本」 |
@@ -588,7 +591,7 @@ ontology_asset_catalog
 ## 测试
 
 ```bash
-npm test        # 二十四组，共 322 项断言
+npm test        # 二十五组，共 337 项断言
 ```
 
 | 文件 | 覆盖 |
