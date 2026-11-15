@@ -10,7 +10,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.34
+## 当前状态：v0.35
 
 | 部分 | 状态 |
 | --- | --- |
@@ -27,7 +27,7 @@
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
 | Action 执行器 | ✅ 入参校验 → 审批 → 单/多 effect（赋值或增量）→ 规则回验 |
 | Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
-| 可视化定义 | ✅ 面板可新建/编辑/删除**对象、关系、规则**，保存前按整包校验并回显问题 |
+| 可视化定义 | ✅ 面板可新建/编辑/删除**对象、关系、规则**；图谱视图支持拖节点排版与拖拽建关系 |
 | 面板实时化 | ✅ 九个页面全部读真实资产 |
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
 | 版本历史 | ✅ 每次写入追加一条 JSONL，可查「改过什么、在哪个版本」 |
@@ -61,12 +61,15 @@
 
 ```bash
 # profile 不存在时先按默认模板建一个
+
 dsh --profile <profile名> --from-default-profile web
 
 # 以 link 方式装入本仓库
+
 dsh plugin --profile <profile名> add link:<本仓库路径>
 
 # 起宿主
+
 dsh --profile <profile名> web
 ```
 
@@ -77,6 +80,61 @@ dsh --profile <profile名> web
 - **宿主半不会热重载**。改了 `index.js` 要先重启宿主；桌面版可以把插件开关关一次再打开，
   效果等同重载（`ontology_diagnostics` 里的「版本一致」会告诉你现在跑的是哪一版）。
 - **客户端包会被浏览器缓存**。升级后如果面板显示「演示数据」，按 `Ctrl+Shift+R` 强刷。
+
+## 三分钟上手
+
+装好之后，四种最常见的动作：
+
+**1. 先看有什么**
+
+```
+ontology_list
+→ retail.store-inventory v1.0.0 (published) — 6 对象 / 5 关系 / 4 规则 / 4 动作
+```
+
+**2. 在面板里改本体**（人工操作，不走审批）
+
+左侧栏 → Ontology Studio → **本体模型**：
+
+- `+ 新建对象` 建一个对象，属性表逐行填字段
+- 对象详情里 `+ 新增关系` 连到另一个对象
+- `图谱视图` 看全貌：拖节点排版，从节点右侧圆点拖到另一个节点直接建关系
+
+保存前会按整个资产包校验，错误直接列在表单下面，**磁盘不会被动**。
+
+**3. 在面板里跑规则**（只读）
+
+逻辑与动作页 → `在示例数据上跑一次`，就地看到几处违规、涉及哪几条规则。
+
+**4. 让 Agent 做**（写操作弹审批）
+
+```
+你：这条规则改成 error 级别
+你：改完 Inventory 之后要重新验哪些东西？
+你：体检一下这份本体还缺什么
+```
+
+更多操作细节见 [USAGE.md](USAGE.md)。
+
+## 工具速查
+
+28 个工具（19 读 / 9 写）。按用途分组，逐条说明见[架构文档](docs/architecture.md)。
+
+| 想做什么 | 用哪个 |
+| --- | --- |
+| 看有哪些包 / 看一个对象 | `ontology_list` · `ontology_get` |
+| 校验 / 影响分析 / 回归清单 | `ontology_validate` · `ontology_impact` · `ontology_regression_plan` |
+| 改模型 | `ontology_upsert_object` · `ontology_upsert_link` · `ontology_delete_object` · `ontology_delete_link` · `ontology_publish` |
+| 跑规则 / 执行动作 | `ontology_evaluate_rules` · `ontology_execute_action` |
+| 看事实数据 / 变更历史 | `ontology_records` · `ontology_history` |
+| 从表结构或样例报文建草稿 | `ontology_draft_object` · `ontology_draft_from_payload` |
+| 导出 / 生成页面规格 | `ontology_export` · `ontology_generate_app` |
+| 资产市场 | `ontology_asset_catalog` · `ontology_install_asset` · `ontology_uninstall_asset` · `ontology_upgrade` · `ontology_diff` |
+| Agent 与体检 | `ontology_agents` · `ontology_harness_check` |
+| 效果评测 | `ontology_eval_run` · `ontology_eval_compare` |
+| 装好没装好 | `ontology_diagnostics` |
+
+所有写工具都遵循同一条不变量：**先构造「写完之后」的整包再校验，不通过就什么都不写**；都支持 `dryRun` 预览。
 
 ## 配置
 
@@ -120,663 +178,6 @@ dsh --profile <profile名> web
 ```
 
 约定类检查**只出现在 `ontology_validate` 的建议里，不阻断写入**——一条团队约定不该能把平台卡死。
-
-## 统一本体 IR
-
-`assets/store-inventory.ir.json` 是「门店—商品—库存」资产包，`assets/ontology-ir.schema.json` 是它的正式 Schema（JSON Schema 2020-12）。设计要点：
-
-- **一份 IR 驱动所有下游**：可视化模型、HTTP API、Agent 工具定义、校验规则、影响分析都由它派生；
-- **Schema 管形状，代码管引用**：JSON Schema 表达不了「主键必须是已声明属性」「关系端点必须存在」「动作写入的对象必须存在」「策略只能指向已定义动作」，这些在 `lib/ir.mjs` 里检查；
-- **命名即约束**：包 id `域.名称`、对象 `PascalCase`、属性 `camelCase`、关系 `snake_case`、规则与策略 `域.名称`，写错就会被校验器拦下。
-
-目录里的每个 `*.ir.json` 就是一份资产，**改文件即全部部署步骤**；仓库按 mtime 缓存，文件一变就重校验。
-
-## 三条通路，同一份数据
-
-```
-                     assets/*.ir.json  ← 唯一事实来源
-                             │
-              ┌──────────────┼──────────────┐
-              ▼              ▼              ▼
-      Agent 工具        HTTP API        面板（浏览器）
-   ontology_*（28 个）  /dsh-ontology-*   fetch 同源接口
-```
-
-### Agent 工具
-
-| 工具 | 读/写 | 作用 |
-| --- | --- | --- |
-| `ontology_list` | 读 | 列出资产包及对象/关系/规则/动作数量与校验状态 |
-| `ontology_get` | 读 | 读一个包；带 `objectId` 时返回该对象的属性、关系、相关规则与动作 |
-| `ontology_validate` | 读 | 校验结构与跨引用，返回带路径的问题列表 |
-| `ontology_impact` | 读 | 对象影响分析：下游关系、规则、动作、审批策略 |
-| `ontology_evaluate_rules` | 读 | 用示例数据真正求值业务规则，返回违规行与不可解析规则 |
-| `ontology_draft_object` | 读 | 反向建模：表结构 → 本体对象草稿（只生成不写盘） |
-| `ontology_diagnostics` | 读 | 自检：版本、资产、门禁、简报、服务、轨迹一次报全 |
-| `ontology_records` | 读 | 查看事实数据：每个对象多少行、字段样例 |
-| `ontology_history` | 读 | 变更历史：谁在哪个版本改了什么 |
-| `ontology_export` | 读 | 导出 JSON Schema 或 Markdown 文档（只返回内容，不写文件） |
-| `ontology_asset_catalog` | 读 | 资产市场：可安装 / 已安装 / 依赖是否满足 |
-| `ontology_generate_app` | 读 | 由对象元数据生成页面规格（列/筛选器/操作表单） |
-| `ontology_agents` | 读 | Agent 花名册（声明）+ 实际调用（轨迹） |
-| `ontology_harness_check` | 读 | 体检：作为 Agent 底座还缺什么（结构/规则/动作/护栏/数据/Agent） |
-| `ontology_eval_run` | 读 | 跑一次规则评测并记录条件指纹（包/规则/数据） |
-| `ontology_eval_compare` | 读 | 对比两次评测；规则与数据同时变了会拒绝比较 |
-| `ontology_install_asset` | **写** | 从 catalog 安装一个包，缺依赖则拒绝 |
-| `ontology_uninstall_asset` | **写** | 卸载一个包，被依赖则拒绝 |
-| `ontology_diff` | 读 | 对比两个包，按对象/关系/规则/动作/策略/Agent 分组 |
-| `ontology_draft_from_payload` | 读 | 从一段样例报文反向生成对象草稿（只生成不写盘） |
-| `ontology_regression_plan` | 读 | 改一个对象后要重验什么：规则/动作/关系/Agent/产物 |
-| `ontology_upgrade` | **写** | 用市场里的同名新版本原位升级（支持 dryRun），记 op=upgrade |
-| `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
-| `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
-| `ontology_delete_link` | **写** | 删除一条关系 |
-| `ontology_delete_object` | **写** | 删除对象；被引用时默认拒绝，`cascade` 才连带清理 |
-| `ontology_publish` | **写** | 校验全通过后按 `patch`/`minor`/`major` 递增版本并置为 `published` |
-| `ontology_execute_action` | **写** | 执行业务动作：入参校验 → 审批 → 应用副作用到事实数据 → 规则回验 |
-
-所有写工具都遵循同一条不变量：**先构造「写完之后」的整包再校验，不通过就什么都不写**；都支持 `dryRun` 预览。
-
-`ontology_get('retail.store-inventory', 'Inventory')` 的实际渲染输出：
-
-```
-门店-商品-库存 / 库存 (Inventory)
-门店 + SKU 维度的可售库存快照。
-属性：
-  - storeId（门店编号）: string 必填
-  - availableQty（可售数量）: number
-  - safetyStock（安全库存）: number
-  ...
-关系：belongsTo → Store, references → Product
-可用动作：adjustInventory(需审批), createTransfer(需审批), startStocktake
-```
-
-写入的安全边界：**校验不过就不写**。`ontology_upsert_object` 会先构造出「写完之后」的整包再校验——包括跨引用——通过才落盘；`ontology_publish` 在包无效时同样拒绝，并把磁盘原样保留。
-
-删除是唯一有级联风险的写操作，所以它默认**拒绝**：
-
-```
-delete Inventory            → blocked：还有 2 条关系、3 个动作、1 条策略引用它
-delete Inventory --cascade  → 删除对象 + 相关关系 + 只写它的动作
-                              （动作还写别的对象则保留并从 writes 里摘掉它）
-                              + 清理指向被删动作的策略
-```
-
-级联之后仍会整包校验，确保不留下悬空引用。
-
-### 能力门禁：只读模式
-
-在 profile 的 `cordis.patch.yml` 里给这一行加配置，写工具就**不会被注册**——不是禁用按钮，是 Agent 根本看不到这些工具：
-
-```yaml
-- id: dsh-ontology-studio
-  name: dsh-ontology-studio
-  config:
-    writeMode: readonly        # 默认 open
-    assetsDir: E:/path/to/assets
-```
-
-面板顶栏会显示「只读模式」，`/status` 也会返回 `readOnly: true`。
-
-### 逐次审批闸门
-
-`writeMode` 是全局开关；真正决定「这一次写能不能落盘」的是审批闸门：
-
-```yaml
-config:
-  approval: destructive   # never | destructive（默认）| all
-```
-
-| 模式 | 需要审批的操作 |
-| --- | --- |
-| `never` | 无 |
-| `destructive`（默认） | 删除对象、删除关系、发布版本 |
-| `all` | 所有写入，含新增/替换对象与关系 |
-
-每次需要审批时，宿主调用 DSH 的审批服务：
-
-```js
-approval.request({ agent, toolName, callId, reason, displayReason, signal })
-  → 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
-```
-
-**只有 `allowed-once` 放行**，其余三种一律拒绝写盘。审批服务不存在、没有会话上下文、请求抛错（例如当前没有打开的 turn）——同样失败关闭，并在返回里带上 `approval` 字段说明原因。
-
-面板顶栏会标明「删除/发布需审批」或「写入需审批」。
-
-## 规则真的能算
-
-规则在 IR 里只有一句表达式，没有对象指针。`ontology_evaluate_rules` 会：
-
-1. **推导归属**：找出「声明的属性覆盖表达式里所有标识符」的那个对象；
-2. **在示例数据上求值**：逐行计算，收集违规行与命中值；
-3. **推不出来就明说**：不猜、不默认通过。
-
-实际输出（`assets/store-inventory.records.json`，11 行数据）：
-
-```
-规则求值：2 条生效 / 4 条声明，扫描 11 行数据
-违规：4 处，涉及 2 条规则
-✗ inventory.lowStockWarning（Inventory，5 行） → 3 处违规
-    row 0: {"availableQty":80,"safetyStock":150}
-    row 4: {"availableQty":18,"safetyStock":40}
-✗ inventory.stockoutAlert（Inventory，5 行） → 1 处违规
-    row 1: {"availableQty":0}
-- 跳过 inventory.turnoverHealth：无法解析到对象：turnoverDays 不是任何对象的属性
-- 跳过 inventory.autoReplenish：无法解析到对象：leadTime 不是任何对象的属性
-```
-
-那两条被跳过的规则不是缺陷，是**真实发现**：表达式引用了本体里没有声明的字段，说明模型和规则还没对齐。
-
-### 面板自己会报告健康状态
-
-页面渲染崩了，用户只会看到白屏，而 Agent 看不到屏幕。所以面板有两道自检：
-
-- **页面级错误边界**：某一页抛错时降级成一张错误卡片（含错误信息），不会把整个面板打空；
-- **上报**：每次切页 `POST /panel-report`，页面崩了也上报 —— 一条 `{"phase":"page-error","page":"data","error":"..."}` 落进 `.ontology-panel.jsonl`，出问题可以直接读文件，不用猜。
-
-两层都刻意做成「永不阻断渲染」：上报失败无声忽略，错误卡片始终可读。
-
-规则和动作都跑在**事实数据**上，所以给了一个直接看数据的入口：
-
-```
-ontology_records({ packageId, objectId: "Inventory", limit: 2 })
-```
-
-```
-事实数据：11 行（assets/store-inventory.records.json）
-Inventory：5 行
-  {"storeId":"S-0213","skuId":"SKU-1001","availableQty":80,"safetyStock":150,…}
-  {"storeId":"S-0213","skuId":"SKU-1002","availableQty":0,"safetyStock":20,…}
-  …还有 3 行
-```
-
-规则说「有 3 行低于安全库存」时，可以直接看那 3 行到底长什么样，而不是凭结论反推数据。
-
-求值器是手写的词法 + 递归下降（`lib/expr.mjs`、`lib/expr-lexer.mjs`），**不用 `eval`、不用 `Function`**：函数调用、赋值、分号、花括号全部是语法错误，资产文件里塞不进可执行代码。
-
-## 执行轨迹
-
-每个 `ontology_*` 调用都会追加一行 JSONL：
-
-```json
-{"ts":1794585923436,"tool":"ontology_get","ok":true,"ms":0,"summary":"ontology_get: retail.store-inventory · Inventory","error":null}
-```
-
-- 记录的是**真的发生了什么**：被拒绝的删除、找不到的包都记为 `ok: false` 并带上原因；
-- 文件超过上限自动只留最近 N 条，一行写坏（进程被杀）只是被跳过，不会让读失败；
-- 面板的「可观测与评测」页读 `/traces` 渲染，没连上宿主时才回落到演示数据。
-
-轨迹默认落在 `assetsDir` 的上一级 `.ontology-traces.jsonl`，已加入 `.gitignore`；可用 `config.traceFile` 改位置，`config.trace: false` 关闭。
-
-## 动作真的能执行
-
-动作不是一句描述，它要能跑。跑一条链路：
-
-```json
-{
-  "id": "adjustInventory",
-  "inputSchema": [
-    { "name": "storeId", "type": "string", "required": true },
-    { "name": "skuId", "type": "string", "required": true },
-    { "name": "availableQty", "type": "number", "required": true }
-  ],
-  "approvalRequired": true,
-  "writes": ["Inventory"],
-  "effect": {
-    "object": "Inventory",
-    "matchKeys": ["storeId", "skuId"],
-    "set": { "availableQty": "availableQty" }
-  }
-}
-```
-
-`ontology_execute_action` 依次做五件事：
-
-```
-① 入参校验      缺字段 / 类型错 / 负数 / 未知字段 → 直接拒绝，不碰数据
-② 判定审批      action.approvalRequired 或策略 effect=require-approval
-③ 应用副作用    按 matchKeys 定位行，只改 set 里声明的字段
-④ 规则回验      执行前后各跑一次规则，报告违规数的变化
-⑤ 写回 + 轨迹   落盘事实数据，调用本身进入 Trace
-```
-
-真实输出：
-
-```
-adjustInventory：命中 1 行，更新 1 行 → assets/store-inventory.records.json
-  {"availableQty":80} → {"availableQty":200}
-规则回验：违规 4 → 3
-```
-
-**effect 是声明式的，不含代码**：它只说改哪个对象的哪些字段、值从入参的哪个字段来。执行器是唯一碰数据的东西，资产文件依旧塞不进可执行代码。
-
-`matched === 0` 时返回失败并说明匹配键，不伪造成功——「Agent 说成功了」和「真的改了」是两件事，这一步就是拿后者卡前者。
-
-### 跨对象动作：一次调用改多行
-
-`effect` 可以是一个对象，也可以是数组。数组按顺序应用，每项自己声明 `matchKeys` 和改法。`matchKeys` 的每一项可以是字段名，也可以是 `{ field, from }`——用来处理「入参叫 `fromStoreId`、目标行上叫 `storeId`」这种错位。
-
-动作的改法有两种：
-
-| 写法 | 含义 |
-| --- | --- |
-| `set` | 直接赋入参的值 |
-| `adjust` | 按表达式做增量，例如 `"-qty"`、`"qty * -1"`（表达式同样走安全求值器，只能引用入参字段） |
-
-`createTransfer` 就是跨对象动作：
-
-```json
-"effect": [
-  { "object": "Inventory",
-    "matchKeys": [{ "field": "storeId", "from": "fromStoreId" }, { "field": "skuId", "from": "skuId" }],
-    "adjust": { "availableQty": "-qty" } },
-  { "object": "Inventory",
-    "matchKeys": [{ "field": "storeId", "from": "toStoreId" }, { "field": "skuId", "from": "skuId" }],
-    "adjust": { "availableQty": "qty" } }
-]
-```
-
-实测一次调拨 50 件：
-
-```
-调拨前: S-0213:80  S-0188:95
-调拨后: S-0213:30  S-0188:145      ← 总量守恒，没多也没少
-```
-
-只有一侧命中（比如调出门店不存在）时，工具如实报告 `matched: 1` 并在 `effects` 里给出每项的命中数，不假装整笔成功。
-
-删除对象时会连带清理指向它的 effect 条目——多 effect 的动作保留其余项，`writes` 里不再有对象的动作整条删除。
-
-目前只有 `adjustInventory` 同时声明了 `inputSchema` 与 `effect`；其余三个动作会被明确列出为不可执行，而不是静默跑通。
-
-## Context Engine：进对话就懂这个本体
-
-Agent 不该靠一次次调工具去试探「这里有什么」。插件通过 `ctx.systemPrompt.section()` 把一份本体简报注入系统提示：
-
-```
-## 本体上下文 · 门店-商品-库存
-资产包 `retail.store-inventory` v1.0.0（published，域 supply-chain）
-
-### 对象
-- **Inventory** 库存（7 属性，主键 storeId+skuId）
-- **Store** 门店（5 属性，主键 storeId）
-...
-
-### 规则（4 条）
-- inventory.lowStockWarning [warn] `availableQty < safetyStock`
-- inventory.autoReplenish [warn，已停用] `...
-
-### 可执行动作
-- adjustInventory 库存调整（需审批）→ 写 Inventory；入参 storeId, skuId, availableQty
-
-### 暂不可执行的动作
-- createTransfer 发起调拨（缺 inputSchema 或 effect）
-```
-
-三个设计约束：
-
-- **稳定**：同样的本体产出**逐字相同**的文本。简报每步都在提示里，一变就可能击穿 prompt 缓存；
-- **有界**：默认 4000 字符。超长时先丢掉属性明细，再截断并明确标注「已截断、可用 ontology_get 查」；
-- **自更新**：写工具执行后重建缓存，Agent 改完本体立刻看到新结构，不需要重启。
-
-```yaml
-config:
-  context: brief        # off | brief（默认）| full
-  contextMaxChars: 4000
-```
-
-这是**发现层**的 Context Engine：让 Agent 知道有什么、该用哪个工具，细节仍按需用 `ontology_get` 拉取。
-
-任务层也做了，但刻意做得很轻：`agent/pre-step` 只**观察**本轮对话，在简报末尾追加一行
-「本轮可能相关：Inventory」。它从不改写进入这一步的消息——猜错只多一行建议，
-不会让答案缺料。
-
-## 并发：丢失更新会报错，不会静默
-
-两个 Agent 同时改一份资产，最坏的结果不是报错，而是**其中一笔悄无声息地消失**。这里有两道防线：
-
-**1. 乐观锁（etag CAS）。** 每次写入都带着「它读到时的内容指纹」：
-
-```
-ontology_get  → { …, etag: "sha256-3f2a…" }
-ontology_upsert_object { …, ifEtag: "sha256-3f2a…" }
-  ├─ 文件没变  → 写入，返回新 etag
-  └─ 文件变了  → { ok: false, conflict: true, etag: "sha256-9c71…" }
-                 「资产已被修改，请重新读取（ontology_get）后再写入」
-```
-
-写入工具会自动拿**本次读取**的 etag 做 CAS，所以即使调用方不传 `ifEtag`，并发写入也不会互相覆盖——输的一方拿到明确冲突和最新 etag，重试即可。
-
-**2. 每文件写锁。** 所有写入经过同一个串行队列，不会出现两个 `writeFile` 交错写出半截 JSON。
-
-实测：五路并发新增对象 → **五路全部成功，磁盘上五个对象一个不丢**。
-
-（早期版本不是这样：那时读-改-写在锁外，五路里四路会报冲突。v0.28 把整段读改写
-放进文件锁后，并发新增变成排队而不是争抢；显式传 `ifEtag` 时仍然保留 CAS 语义。）
-
-```bash
-node test/concurrency.test.cjs   # 10 项
-node test/durability.test.cjs    # 9 项：并发不丢数据、无临时文件残留
-```
-
-边界：这是**单进程内**的保护。多个 DSH 实例共享同一资产目录时没有分布式锁——那需要外部协调（文件租约或数据库），不在当前范围。
-
-## 装好没装好，一次调用确认
-
-重启之后先跑这个：
-
-```
-ontology_diagnostics
-```
-
-```
-本体工作台 v0.34 自检：正常
-✓ 资产目录：…/assets（1 个资产包）
-✓ 资产包：1 个全部通过校验
-✓ 写入能力：可写（审批档位 destructive）
-✓ 上下文简报：1209 字符，已就绪
-✓ 工具注册：28 个（读写）：ontology_list, ontology_get, …
-✓ 服务 approval：可用
-✓ 执行轨迹：…/.ontology-traces.jsonl（可写）
-```
-
-三个用途：
-
-- **确认加载的是新代码**：版本来自 `package.json`。宿主不会热重载宿主半，如果这里显示的是旧版本号，说明还需要重启——光看「工具有没有」是看不出来的，旧的 6 个工具也在；
-- **确认可选服务**：`approval` / `systemPrompt` / `webServer` 缺任何一个，对应能力会静默降级（写入不再要审批、没有本体简报、面板读不到数据），自检会点名；
-- **确认资产健康**：目录、包数量、校验状态、轨迹可写性一次报全。
-
-有 `fail` 项时 `ok` 就是 `false`；`warn` 只是降级，不阻止使用。
-
-## 反向建模：表结构 → 本体草稿
-
-规划文档里的 AI 反向建模，我把它拆成两半：**理解交给模型，归一化交给平台**。`ontology_draft_object` 做后一半——它是确定性的，同样的表永远产出同样的草稿。
-
-```
-输入 dwd_transfer_order（门店调拨单表）
-  transfer_no   varchar(32)  调拨单号  PK
-  from_store_id bigint       调出门店
-  to_store_id   bigint       调入门店
-  qty           int          调拨数量  NOT NULL
-  status        enum('draft','approved','done')
-                ↓
-TransferOrder（门店调拨单），主键 transferNo
-  - transferNo : string 必填    - qty : integer 必填
-  - fromStoreId : integer      - status : enum [draft/approved/done]
-  - toStoreId : integer
-关系建议：transfer_order_from_store_references_store → Store
-          transfer_order_to_store_references_store   → Store
-预校验：并入后整包仍然合法
-```
-
-做了这些归一：
-
-| 环节 | 规则 |
-| --- | --- |
-| 类型映射 | `decimal` → money、`timestamp` → datetime、`tinyint(1)` → boolean、`enum(...)` 解析出取值；认不出的类型降级 string 并**明确标注原类型** |
-| 命名 | 列名 snake_case → camelCase（`SKU_CODE` → `skuCode`；已有驼峰保持原样）；表名去 `dwd_`/`dim_`/`ods_` 等前缀并单数化（`ads_sales` → `Sale`） |
-| 主键 | 优先 `primaryKey` 标记，其次 `id` 列，都没有就**报问题而不是猜** |
-| 关系 | `*_id` 列按对象名匹配，支持限定词（`fromStoreId` → Store）；指向未知对象不硬造 |
-| 预校验 | 草稿并入目标包副本后跑一遍校验，直接告诉你「能不能入库」 |
-
-**它不写盘。** 生成草稿 → 人/Agent 审阅 → 用 `ontology_upsert_object` 落库。反向建模最容易出的错是「看起来很合理但语义不对」，所以草稿必须过一遍人工或显式确认。
-
-## 一份 IR，两种产物
-
-规划里说「一个模型定义可以生成 API、SDK、接口文档、校验规则」。目前落地了两种，都从同一份 IR 派生：
-
-**JSON Schema**（draft 2020-12），给别的系统做记录校验：
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "retail.store-inventory/Inventory",
-  "title": "库存",
-  "type": "object",
-  "required": ["storeId", "skuId"],
-  "properties": {
-    "availableQty": { "type": "number", "title": "可售数量" },
-    "updatedAt": { "type": "string", "format": "date-time" },
-    "storeId": { "type": "string", "title": "门店编号" }
-  },
-  "additionalProperties": false,
-  "x-primary-key": ["storeId", "skuId"]
-}
-```
-
-类型映射：`money → number`、`date/datetime → string + format`、`enum → string + enum`、`json → object`；`keys` 导出成 `x-primary-key`（JSON Schema 没有主键概念）。
-
-**Markdown 参考文档**：对象/属性表、关系表、规则表（标停用）、动作表（标可执行与审批）、策略列表。
-
-```bash
-ontology_export({ packageId, format: "json-schema" | "markdown", objectId? })
-```
-
-只返回内容、不写文件——落在哪里由调用方决定，插件不替人做目录决策。
-
-## Agent 花名册：声明 + 证据
-
-最后一个演示页面也接上真实数据了。设计问题先定下来：**花名册声明在本体包里**（延续「一切皆可复用资产」），运行数据来自执行轨迹——两者分开，不混成一个数。
-
-```json
-"agents": [
-  {
-    "id": "stock-replenisher",
-    "name": "库存补货 Agent",
-    "model": "deepseek-v4.1-flash",
-    "status": "published",
-    "usesObjects": ["Inventory", "Store", "Product"],
-    "skills": ["补货建议生成"],
-    "tools": ["ontology_get", "ontology_evaluate_rules", "ontology_execute_action"],
-    "actions": ["createReplenishment"],
-    "evalTarget": "补货准确率 ≥ 85%"
-  }
-]
-```
-
-校验器会拦 `usesObjects` / `actions` 指向不存在的东西——花名册不是自由文本。
-
-调用归属靠轨迹里的 `agent` 字段（工具执行时记下 `exec.agent.id`）：
-
-```
-库存补货 Agent（stock-replenisher）· published
-  依赖对象：Inventory, Store, Product
-  实际调用：ontology_get 1 次；ontology_evaluate_rules 1 次
-
-巡店助手 Agent（store-inspector）· gray
-  实际调用：轨迹里没有这个 Agent 的调用
-
-轨迹中无法归属到声明 Agent 的调用：1 次
-```
-
-两列要分开看：
-
-- **声明了但轨迹里没有** → 可能还没上线；
-- **有调用但没声明** → 有人绕过花名册直接用了工具（`unattributed` 会数出来）。
-
-删除对象时的级联也会把它从每个 Agent 的 `usesObjects` 里摘掉，否则整包会因为悬空引用失效。
-
-## 应用构建：从元数据生成页面规格
-
-「应用依赖 Ontology 定义，而不是底层表结构」——这句要能兑现，得先有一样东西：把对象元数据翻译成页面规格。
-```
-ontology_generate_app({ packageId, objects: ["Inventory"] })
-```
-
-```
-门店-商品-库存 · 应用规格（6 页，来自 retail.store-inventory v1.0.0）
-
-库存（list）：7 列，1 个筛选器
-  列：门店编号 / SKU 编号 / 在库数量 / 可售数量 / 锁定数量 / 安全库存 / 更新时间
-  筛选：更新时间（dateRange）
-  操作：库存调整（需审批）— 表单 storeId*, skuId*, availableQty*
-        发起调拨（需审批）— 表单 fromStoreId*, toStoreId*, skuId*, qty*
-```
-
-派生规则都是确定性的：
-
-| 来源 | 生成 |
-| --- | --- |
-| 属性声明 | 列表列（数值右对齐、枚举渲染成 badge、json 不进列表但进详情） |
-| 枚举 / 日期属性 | 筛选器（select / dateRange） |
-| action 的 inputSchema | 操作表单（保留必填标记与枚举取值） |
-| 只有声明没有 effect 的动作 | 不生成表单，并在提示里点名 |
-
-同一份 IR 生成**逐字相同**的规格，所以可以做快照对比——改一个属性，diff 里能直接看到多了一列。
-
-面板的「应用构建」页读这个规格并渲染成预览。**它不是可交互应用**：规格到组件还需要一个渲染器，这一步没做，也不假装做了。
-
-## 资产市场：安装、卸载、依赖
-
-`catalog/` 里放着**可安装**的资产包（不加载），`assets/` 里是**已安装**的（运行时读取）。安装就是复制过去。
-
-随包带了一个真实例子：`retail.member-loyalty`（会员权益，3 对象 / 2 规则 / 2 动作），它 `dependsOn: ["retail.store-inventory"]`。
-
-```
-ontology_asset_catalog
-可安装（1）：
-  · 可安装 retail.member-loyalty v0.2.0 — 3 对象 / 2 规则 / 2 动作；依赖 retail.store-inventory
-已安装（1）：
-  retail.store-inventory v1.0.0（6 对象）
-```
-
-依赖在**两个方向**都拦：
-
-| 动作 | 拒绝条件 | 返回 |
-| --- | --- | --- |
-| 安装 | 依赖没装 | `missing-dependency` + 缺哪些 |
-| 卸载 | 有别的包依赖它 | `required-by` + 谁依赖 |
-
-所以不可能出现「装了会员包但库存包不在」这种半坏状态。包本身校验不通过、重复安装、市场里没有——都有明确错误码，不是笼统一句失败。
-
-**面板不提供安装按钮。** 安装/卸载是写操作，走 Agent 工具才能经过写入门禁和审批闸门；在界面上放个按钮等于开一条绕过审批的后门。市场页只读展示。
-
-### HTTP API（面板用）
-
-| 路由 | 返回 |
-| --- | --- |
-| `GET /dsh-ontology-studio/status` | 资产目录、所有包摘要、校验问题汇总 |
-| `GET /dsh-ontology-studio/package?id=<包id>` | 完整 IR + 该文件的问题列表 |
-| `GET /dsh-ontology-studio/impact?id=<包id>&object=<对象id>` | 对象影响分析 |
-| `GET /dsh-ontology-studio/traces?limit=40` | 最近的工具调用轨迹（新→旧） |
-| `GET /dsh-ontology-studio/catalog` | 资产市场状态 |
-| `GET /dsh-ontology-studio/app-spec?id=` | 生成的应用页面规格 |
-| `GET /dsh-ontology-studio/agents?id=` | Agent 花名册与调用统计 |
-| `GET /dsh-ontology-studio/evaluate?id=` | 在示例数据上跑规则求值（只读，面板可点） |
-| `GET /dsh-ontology-studio/records?id=<包id>&object=&limit=` | 事实数据的行数抽样 |
-| `GET /dsh-ontology-studio/history?id=&limit=40` | 资产包的变更历史（新→旧） |
-| `POST /dsh-ontology-studio/panel-report` | 面板上报自己的渲染健康状态（落到 .ontology-panel.jsonl） |
-
-写接口（面板上的人工操作，**不走 Agent 审批闸门**，与直接改 JSON 同层级）：
-
-| 路由 | 作用 |
-| --- | --- |
-| `POST /dsh-ontology-studio/write/save-object` | 新增或替换对象，整包校验通过才落盘 |
-| `POST /dsh-ontology-studio/write/delete-object` | 删除对象；有引用时 409 并列出依赖，`cascade` 才连带清理 |
-| `POST /dsh-ontology-studio/write/save-link` | 新增或替换关系，两端对象必须已存在 |
-| `POST /dsh-ontology-studio/write/delete-link` | 删除关系 |
-| `POST /dsh-ontology-studio/write/save-rule` | 新增或替换规则，保存前真的解析表达式并推导归属 |
-| `POST /dsh-ontology-studio/write/delete-rule` | 删除规则 |
-
-写接口有 CSRF 防护：跨站 `origin` 或 `sec-fetch-site` 一律 403——写路由开在 localhost 上，
-不设防的话用户打开的任意网页都能改他的本体。只读模式下这些接口整体 403。
-
-读接口只接受 GET（其它方法 405），写接口只接受 POST；未知路由 404，handler 抛错返回 500（不会让请求挂住）。面板每个 Studio 的顶栏会显示数据来源：`实时资产` / `演示数据 · 服务未连接`。
-
-## 测试
-
-```bash
-npm test        # 二十七组，共 366 项断言
-```
-
-| 文件 | 覆盖 |
-| --- | --- |
-| `test/ir.test.cjs` | 27 项：Schema 语义、每类错误各一条、未知字段（含拼写错误）、影响分析、仓库读目录 |
-| `test/context.test.cjs` | 10 项：简报内容、级别差异、稳定逐字一致、超长降级与截断 |
-| `test/reverse.test.cjs` | 16 项：类型映射、命名归一、表名单数化、主键回退、关系推断、重复列、预校验、工具不写盘 |
-| `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发全部成功且不丢数据、显式 ifEtag 仍拒绝过期写入 |
-| `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
-| `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
-| `test/export.test.cjs` | 9 项：类型映射、必填与主键、enum、money、、文档五节、动作可执行标记、工具不写盘 |
-| `test/sample.test.cjs` | 14 项：类型推断、主键优先 id 再 *No 再 *Id、外键推关系、嵌套抽取、逐字稳定 |
-| `test/focus.test.cjs` | 9 项：文本提取、id/中文名/属性名命中、排序与上限、无命中返回空 |
-| `test/router.test.cjs` | 12 项：超长入参不回显、路径穿越只是 404、HEAD 无 body、非法方法 405、limit 夹取、请求体上限、原型不污染、除零与注入式表达式 |
-| `test/durability.test.cjs` | 9 项：旧 etag 被拒、同 etag 并发只有一成功、十路并发不丢数据、无临时文件残留、改名失败时原文件完好 |
-| `test/robust.test.cjs` | 10 项：空包/空对象/emoji 不崩、简报严格不超上限、悬空规则告警、坏表达式、工具层集成 |
-| `test/lint.test.cjs` | 6 项：正则与 equals 规则、非法规则报错、只报建议不影响 ok |
-| `test/diff.test.cjs` | 10 项：逐条定位变更、属性增删改、人读摘要、catalog 对比、升级落盘与留痕、无新版本拒绝、审批拒绝不写盘 |
-| `test/agents.test.cjs` | 9 项：花名册校验、坏引用、id 规范、按 agent 归属、失败计数、未声明会话计入 unattributed |
-| `test/app.test.cjs` | 12 项：每对象一页、数值右对齐、枚举 badge、筛选派生、表单来自 inputSchema、只有声明不生成表单、逐字稳定 |
-| `test/registry.test.cjs` | 12 项：catalog 状态、依赖缺失拒绝安装、重复安装、被依赖拒绝卸载、先卸依赖方、工具层贯通 |
-| `test/history.test.cjs` | 6 项：各类写入留痕、版本号跟随、失败不留痕、过滤与上限、关闭历史 |
-| `test/tools.test.cjs` | 24 项：激活、`ctx.effect` 挂载、二十八个工具端到端、只读模式只剩十九个读工具、上下文段落与 pre-step 监听注册、缺少可选服务时照常工作、自检报告 |
-| `test/write.test.cjs` | 32 项：对象与关系的增改删、级联、审批闸门、校验失败不落盘、`dryRun` 返回值符合 output schema、版本递增、发布拒绝 |
-| `test/api.test.cjs` | 19 项：六条路由、400/404/405/500、只读与审批标记、面板上报、目录缺失 |
-| `test/e2e.test.cjs` | 12 项：整条链路按真实使用顺序跑一遍（现状→建模→执行→回收→轨迹），验证各工具彼此自洽 |
-| `test/evals.test.cjs` | 11 项：条件指纹可复现、三种可比组合、规则与数据双变被拒、跨包不比较 |
-| `test/harness.test.cjs` | 10 项：六方面覆盖、空包全指出、无主键/孤立对象/全免审批/Agent 三项缺失分别点名 |
-| `test/panel-writes.test.cjs` | 23 项：CSRF 拒绝跨站、校验失败不落盘、级联清理、关系与规则的增删、只读拒绝 |
-| `test/focus-wire.test.cjs` | 8 项：pre-step 观察后简报真的多一行、换一句话换聚焦、监听器永远放行 |
-| `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
-
-写路径的测试全部在临时目录里跑，**不会改动仓库里的 `assets/`**。
-
-## 目录结构
-
-```
-dsh-ontology-studio/
-├─ package.json            # bundle 清单：dsh.bundle.patch + dsh.client
-├─ cordis.patch.yml        # 把插件行插入 profile 花名册
-├─ index.js                # 宿主半：28 个工具 + 读写 HTTP 路由 + 上下文注入
-├─ lib/
-│  ├─ ir.mjs               # 校验器、统计、影响分析（纯函数，无依赖）
-│  ├─ expr.mjs / expr-lexer.mjs  # 规则表达式词法与递归下降求值（不用 eval）
-│  ├─ rules.mjs            # 规则归属推导与求值
-│  ├─ actions.mjs          # 动作入参校验与声明式副作用
-│  ├─ context.mjs          # 注入系统提示的本体简报（稳定 + 有界）
-│  ├─ reverse.mjs          # 反向建模：表结构 → 本体草稿
-│  ├─ trace.mjs            # 执行轨迹：追加式 JSONL，超限自动截断
-│  ├─ store.mjs            # 资产仓库：扫目录、mtime 缓存、原子写入、CAS、版本递增
-│  ├─ api.mjs              # 面板用的只读 JSON 路由
-│  ├─ panel-writes.mjs     # 面板写路由：对象/关系/规则，CSRF 防护
-│  ├─ registry.mjs         # 资产市场：catalog 扫描、安装、卸载、依赖校验
-│  ├─ diff.mjs             # 两个包按条目对比
-│  ├─ app.mjs              # 元数据 → 页面规格
-│  ├─ sample.mjs           # 样例报文 → 对象草稿
-│  ├─ regression.mjs       # 改动后的回归清单
-│  ├─ harness-check.mjs    # 作为 Agent 底座的六方面体检
-│  ├─ evals.mjs            # 规则评测运行与可比性判定
-│  ├─ focus.mjs            # 任务层聚焦打分
-│  └─ lint.mjs             # config.lintRules 团队约定
-├─ USAGE.md                # 面向使用者的操作说明（面板怎么点、Agent 怎么说）
-├─ client.js               # 浏览器半：主面板 + 侧栏入口 + 九个页面 + 三个编辑器
-├─ assets/
-│  ├─ ontology-ir.schema.json      # IR 的正式 JSON Schema
-│  ├─ store-inventory.ir.json      # 零售示例资产包
-│  └─ store-inventory.records.json # 示例事实数据（规则跑在它上面）
-├─ catalog/                # 可安装但未加载的资产包（含同 id 的新版本）
-├─ test/                   # 26 个测试文件，npm test 依次跑
-├─ locale/{en,zh}.json     # 插件管理页的标题、描述、详情文档指向
-├─ icon.svg
-└─ docs/
-   ├─ DETAIL.md            # 插件详情页正文
-   ├─ harness2-notes.md    # 从 Harness² 借了什么、明确不做什么
-   └─ plan-source.md       # 规划原文（需求基线，默认不入库）
-```
-
-## 八个 Studio 与规划文档的对应关系
-
-| 规划文档 | 本仓库落点 |
-| --- | --- |
-| Ontology Model Studio（对象/属性/关系/动作、多视角、影响分析） | `client.js` → `OntologyPage`，数据来自 `assets/*.ir.json` |
-| Data Studio（同步型 / 联邦型并存、字段映射） | `DataPage` 读真实事实数据：行数、属性填充率；接入策略仍是设计说明 |
-| Logic & Action Studio（规则、函数、动作、审批闸门） | `LogicPage` 读真实 IR：规则表达式、动作审批标记、可执行性 |
-| Agent & Harness Studio（Ontology-aware 上下文与工具） | `AgentPage` 读真实花名册 + 轨迹归因 |
-| App Studio（应用依赖本体而非表结构） | `AppPage` 读生成的页面规格并渲染预览 |
-| Governance Center（ID/版本/责任人/审核/审计） | `GovernancePage` 读真实变更历史；权限与审核仍是演示 |
-| Marketplace（三层资产、安装与复用） | `MarketplacePage` 读真实 catalog；依赖校验在工具层 |
-| Observability & Evaluation（Trace 与质量闭环） | `ObservabilityPage` 读真实轨迹与调用统计 |
 
 ## 路线图
 
@@ -822,6 +223,19 @@ dsh-ontology-studio/
 3. **AI Native**：AI 参与资产创建到发布的每个阶段，但不绕过治理。
 4. **一切皆可复用资产**：独立安装、依赖管理、版本升级、跨域复用。
 5. **API First + Event Driven**：先定接口与事件，再建 UI。
+
+## 深入阅读
+
+README 只回答「这是什么、怎么装、怎么用、边界在哪」。想往下钻的：
+
+| 文档 | 覆盖 |
+| --- | --- |
+| [架构：IR、三条通路与代码结构](docs/architecture.md) | 统一本体 IR、三条通路，同一份数据、目录结构、八个 Studio 与规划文档的对应关系 |
+| [规则与动作](docs/rules-and-actions.md) | 规则真的能算、动作真的能执行 |
+| [运行时：并发、轨迹、自检与评测](docs/runtime.md) | 执行轨迹、并发：丢失更新会报错，不会静默、装好没装好，一次调用确认 |
+| [建模辅助：反向建模、应用生成与产物导出](docs/modeling.md) | 反向建模：表结构 → 本体草稿、一份 IR，两种产物、应用构建：从元数据生成页面规格 |
+| [Agent 与资产流转](docs/agents-and-market.md) | Context Engine：进对话就懂这个本体、本体上下文 · 门店-商品-库存、Agent 花名册：声明 + 证据、资产市场：安装、卸载、依赖 |
+| [测试](docs/testing.md) | 测试 |
 
 ## 已知边界
 
