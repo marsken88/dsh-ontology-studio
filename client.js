@@ -1496,7 +1496,7 @@ window.__ModuleLoader__.load({
                 ? h(Table, {
                     columns: [
                       { key: '1', label: '动作' },
-                      { key: '2', label: '审批' },
+                      { key: '2', label: '审批', render: (r) => r['2'] },
                       { key: '3', label: '写入' },
                     ],
                     rows: obj.actions.map((a) => ({ key: a[0], 1: a[0] + ' · ' + a[1], 2: h(Badge, { tone: a[2] === '需审批' ? 'warn' : 'on' }, a[2]), 3: a[3] })),
