@@ -24,6 +24,9 @@ import { generateAppSpec } from './lib/app.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+/** Loaded code version; kept in sync with package.json by a test. */
+const CODE_VERSION = '0.21.3';
+
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
 
@@ -761,11 +764,26 @@ export function apply(ctx, config = {}) {
       const add = (name, status, detail) => checks.push({ name, status, detail });
 
       let version = 'unknown';
+      let onDisk = null;
       try {
         const pkg = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8'));
+        onDisk = pkg.version;
         version = pkg.version;
       } catch (error) {
         add('插件版本', 'warn', `读不到 package.json：${error.message}`);
+      }
+
+      // The host does not hot-reload its half: after an upgrade the loaded module
+      // can be older than what is on disk, and an asset written for the newer
+      // format then fails validation for reasons that look like data errors.
+      if (onDisk && onDisk !== CODE_VERSION) {
+        add(
+          '版本一致',
+          'fail',
+          `运行中的代码是 v${CODE_VERSION}，磁盘上的包是 v${onDisk}：需要重启宿主才能加载新代码`
+        );
+      } else {
+        add('版本一致', 'ok', `v${CODE_VERSION}`);
       }
 
       const { entries, missingDir } = await store.list();

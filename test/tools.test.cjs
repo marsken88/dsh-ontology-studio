@@ -164,6 +164,14 @@ function fakeContext(options = {}) {
     assert.equal(alt.registered.length, 21);
   });
 
+  await it('代码版本常量与 package.json 一致（防止发布时漏改）', async () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const src = fs.readFileSync(path.join(ROOT, 'index.js'), 'utf8');
+    const m = /const CODE_VERSION = '([^']+)'/.exec(src);
+    assert.ok(m, 'index.js 里应有 CODE_VERSION 常量');
+    assert.equal(m[1], pkg.version, 'CODE_VERSION 与 package.json 版本不一致，发布前必须同步');
+  });
+
   await it('ontology_diagnostics 报出版本、配置与检查项', async () => {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: path.join(ROOT, 'assets'), trace: false, approval: 'all' });

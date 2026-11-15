@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.21
+## 当前状态：v0.21.3
 
 | 部分 | 状态 |
 | --- | --- |
@@ -580,7 +580,7 @@ ontology_asset_catalog
 ## 测试
 
 ```bash
-npm test        # 十六组，共 236 项断言
+npm test        # 十六组，共 237 项断言
 ```
 
 | 文件 | 覆盖 |
