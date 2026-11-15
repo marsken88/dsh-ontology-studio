@@ -124,6 +124,38 @@ function readPackage(dir) {
     assert.ok(saved.properties.some((p) => p.name === 'inTransitQty'));
   });
 
+  await it('dryRun 的返回值必须符合声明的 output schema（不能有 null）', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const result = await tools.ontology_upsert_object.execute(
+      { packageId: 'retail.store-inventory', object: { id: 'Warehouse', name: '仓库', keys: ['k'], properties: [{ name: 'k', type: 'string', required: true }] }, dryRun: true },
+      {}
+    );
+    const schema = tools.ontology_upsert_object.output.schema.properties;
+    for (const [key, spec] of Object.entries(schema)) {
+      if (result[key] === undefined || result[key] === null) continue;
+      const expected = spec.type;
+      if (expected === 'string') assert.equal(typeof result[key], 'string', key + ' 应当是字符串');
+      if (expected === 'number') assert.equal(typeof result[key], 'number', key + ' 应当是数字');
+      if (expected === 'boolean') assert.equal(typeof result[key], 'boolean', key + ' 应当是布尔');
+    }
+  });
+
+  await it('dryRun 不走审批闸门（不写盘就不需要人拍板）', async () => {
+    const dir = tempAssets();
+    let asked = 0;
+    const tools = await loadTools(dir, {
+      approval: { request: async () => { asked += 1; return 'rejected'; } },
+      config: { approval: 'all' },
+    });
+    const result = await tools.ontology_upsert_object.execute(
+      { packageId: 'retail.store-inventory', object: { id: 'Warehouse', name: '仓库', keys: ['k'], properties: [{ name: 'k', type: 'string', required: true }] }, dryRun: true },
+      { agent: { id: 'session-1' } }
+    );
+    assert.equal(result.ok, true, JSON.stringify(result.problems));
+    assert.equal(asked, 0, 'dryRun 不应发起审批');
+  });
+
   await it('无效对象被拒绝且磁盘不变', async () => {
     const dir = tempAssets();
     const tools = await loadTools(dir);

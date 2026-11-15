@@ -25,7 +25,7 @@ import { generateAppSpec } from './lib/app.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.21.3';
+const CODE_VERSION = '0.21.4';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -241,6 +241,8 @@ export function apply(ctx, config = {}) {
    * all fail closed. Destructiveness and mode come from the caller.
    */
   async function gateWrite(exec, spec) {
+    // A dry run changes nothing on disk, so it never needs a human decision.
+    if (spec.dryRun === true) return { allowed: true, outcome: 'dry-run' };
     const needed = approvalMode === 'all' || (approvalMode === 'destructive' && spec.destructive === true);
     if (!needed) return { allowed: true, outcome: 'not-required' };
 
@@ -1329,6 +1331,7 @@ export function apply(ctx, config = {}) {
       const gate = await gateWrite(exec, {
         toolName: 'ontology_upsert_object',
         destructive: false,
+        dryRun: args.dryRun === true,
         reason: `新增或替换对象 ${args.object && args.object.id}（${args.packageId}）`,
       });
       if (!gate.allowed) {
@@ -1360,7 +1363,7 @@ export function apply(ctx, config = {}) {
         };
       }
       if (args.dryRun) {
-        return { ok: true, action, objectId: args.object.id, packageId: ir.id, version: ir.version, file: null, message: 'dryRun：校验通过，未写盘' };
+        return { ok: true, action, objectId: args.object.id, packageId: ir.id, version: ir.version, etag: entry.etag, message: 'dryRun：校验通过，未写盘' };
       }
       const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
       if (saved.conflict) {
@@ -1428,6 +1431,7 @@ export function apply(ctx, config = {}) {
       const gate = await gateWrite(exec, {
         toolName: 'ontology_publish',
         destructive: true,
+        dryRun: args.dryRun === true,
         reason: `发布本体包 ${args.packageId}（${args.bump || 'patch'} 版本递增）`,
       });
       if (!gate.allowed) {
@@ -1509,6 +1513,7 @@ export function apply(ctx, config = {}) {
       const gate = await gateWrite(exec, {
         toolName: 'ontology_upsert_link',
         destructive: false,
+        dryRun: args.dryRun === true,
         reason: `新增或替换关系 ${args.link && args.link.id}（${args.packageId}）`,
       });
       if (!gate.allowed) {
@@ -1530,7 +1535,7 @@ export function apply(ctx, config = {}) {
       if (!check.ok) {
         return { ok: false, action, linkId: args.link.id, version: ir.version, problems: check.problems, message: '写入会让本体包失效' };
       }
-      if (args.dryRun) return { ok: true, action, linkId: args.link.id, version: ir.version, file: null, message: 'dryRun：校验通过，未写盘' };
+      if (args.dryRun) return { ok: true, action, linkId: args.link.id, version: ir.version, etag: entry.etag, message: 'dryRun：校验通过，未写盘' };
       const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
       if (saved.conflict) {
         return {
@@ -1583,6 +1588,7 @@ export function apply(ctx, config = {}) {
       const gate = await gateWrite(exec, {
         toolName: 'ontology_delete_link',
         destructive: true,
+        dryRun: args.dryRun === true,
         reason: `删除关系 ${args.linkId}（${args.packageId}）`,
       });
       if (!gate.allowed) {
@@ -1678,6 +1684,7 @@ export function apply(ctx, config = {}) {
       const gate = await gateWrite(exec, {
         toolName: 'ontology_delete_object',
         destructive: true,
+        dryRun: args.dryRun === true,
         reason: `删除对象 ${args.objectId}（${args.packageId}${args.cascade ? '，级联清理依赖' : ''}）`,
       });
       if (!gate.allowed) {
