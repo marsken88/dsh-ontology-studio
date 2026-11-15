@@ -14,7 +14,7 @@ import { createStore, bumpVersion } from './lib/store.mjs';
 import { impactOf, summarizeIr, validateIr } from './lib/ir.mjs';
 import { registerRoutes } from './lib/api.mjs';
 import { createTraceStore, summarizeCall } from './lib/trace.mjs';
-import { evaluateRules } from './lib/rules.mjs';
+import { evaluateRules, ruleWarnings } from './lib/rules.mjs';
 import { validateInput, applyEffects, executableActions, policiesFor } from './lib/actions.mjs';
 import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
@@ -30,7 +30,7 @@ import { focusOf, messageText } from './lib/focus.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.26.0';
+const CODE_VERSION = '0.27.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -547,10 +547,14 @@ export function apply(ctx, config = {}) {
       render: (_args, value) => {
         const v = value || {};
         if (v.ok) {
+          const extraWarnings = (v.warnings || []).length
+            ? `\n另有 ${v.warnings.length} 条规则永远不会触发（不阻断发布）：\n` +
+              v.warnings.map((w) => `  ${w.rule} — ${w.message}`).join('\n')
+            : '';
           const extraLint = (v.lint || []).length
             ? `\n另有 ${v.lint.length} 条团队约定建议（不阻断写入）：\n` + v.lint.map((p) => `  [${p.code}] ${p.path} — ${p.message}`).join('\n')
             : '';
-          return text(`✓ ${(v.checked || []).length} 个本体包全部通过校验（${v.dir}）` + extraLint);
+          return text(`✓ ${(v.checked || []).length} 个本体包全部通过校验（${v.dir}）` + extraWarnings + extraLint);
         }
         return text(
           lines([
@@ -578,6 +582,14 @@ export function apply(ctx, config = {}) {
           problems.push({ package: packageId, path: p.path, code: p.code, message: p.message });
         }
       }
+      // Rules that can never fire are warnings, not errors: a package may
+      // legitimately declare a rule before the properties exist.
+      const warnings = [];
+      for (const entry of scope) {
+        if (!entry.ir) continue;
+        for (const w of ruleWarnings(entry.ir)) warnings.push(Object.assign({ package: entry.ir.id }, w));
+      }
+
       // Team conventions (config.lintRules) are reported separately: they never
       // block a write, because a convention must not be able to wedge the platform.
       const lint = [];
@@ -594,6 +606,7 @@ export function apply(ctx, config = {}) {
         checked: scope.map((e) => (e.ir ? e.ir.id : e.file)),
         problems,
         lint,
+        warnings,
       };
     },
   });

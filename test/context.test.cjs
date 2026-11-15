@@ -86,7 +86,7 @@ async function it(name, fn) {
 
   await it('maxChars 有下限保护，不会被设成 0 后吐空串', () => {
     const brief = buildBrief(ir, { maxChars: 0 });
-    assert.ok(brief.length > 400);
+    assert.ok(brief.length >= 400, "下限 400 应被真正遵守（含截断标记也要算在里面）");
   });
 
   await it('没有动作或规则时不崩，且如实写「无」', () => {

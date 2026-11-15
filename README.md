@@ -8,7 +8,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.26
+## 当前状态：v0.27
 
 | 部分 | 状态 |
 | --- | --- |
@@ -588,7 +588,7 @@ ontology_asset_catalog
 ## 测试
 
 ```bash
-npm test        # 二十一组，共 291 项断言
+npm test        # 二十二组，共 301 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -602,6 +602,7 @@ npm test        # 二十一组，共 291 项断言
 | `test/export.test.cjs` | 9 项：类型映射、必填与主键、enum、money、、文档五节、动作可执行标记、工具不写盘 |
 | `test/sample.test.cjs` | 14 项：类型推断、主键优先 id 再 *No 再 *Id、外键推关系、嵌套抽取、逐字稳定 |
 | `test/focus.test.cjs` | 9 项：文本提取、id/中文名/属性名命中、排序与上限、无命中返回空 |
+| `test/robust.test.cjs` | 10 项：空包/空对象/emoji 不崩、简报严格不超上限、悬空规则告警、坏表达式、工具层集成 |
 | `test/lint.test.cjs` | 6 项：正则与 equals 规则、非法规则报错、只报建议不影响 ok |
 | `test/diff.test.cjs` | 10 项：逐条定位变更、属性增删改、人读摘要、catalog 对比、升级落盘与留痕、无新版本拒绝、审批拒绝不写盘 |
 | `test/agents.test.cjs` | 9 项：花名册校验、坏引用、id 规范、按 agent 归属、失败计数、未声明会话计入 unattributed |
