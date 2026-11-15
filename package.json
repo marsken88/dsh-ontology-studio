@@ -55,5 +55,6 @@
   "homepage": "https://github.com/marsken88/dsh-ontology-studio#readme",
   "bugs": {
     "url": "https://github.com/marsken88/dsh-ontology-studio/issues"
-  }
+  },
+  "license": "MIT"
 }

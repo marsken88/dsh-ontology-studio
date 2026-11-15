@@ -5,6 +5,7 @@
 [![test](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml/badge.svg)](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml)
 [![version](https://img.shields.io/github/package-json/v/marsken88/dsh-ontology-studio)](https://github.com/marsken88/dsh-ontology-studio)
 ![node](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)
+[![license](https://img.shields.io/github/license/marsken88/dsh-ontology-studio)](LICENSE)
 
 企业级 Ontology + Harness 平台的落地工程。目标不是做一个「本体建模页面」，而是：
 
@@ -261,6 +262,10 @@ README 只回答「这是什么、怎么装、怎么用、边界在哪」。想�
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
 - **四个动作里三个可执行**：`adjustInventory`、`createTransfer`、`startStocktake` 都声明了 `inputSchema` + `effect`；`createReplenishment` 只有定义。判断标准是「有没有声明 effect」，没有的动作会被直接列出，不会假装执行。
 - **副作用只作用于示例事实数据**：动作改的是 `*.records.json`，没有回写 POS / 供应链系统。
+
+## 许可
+
+[MIT](LICENSE)。
 
 ---
 
