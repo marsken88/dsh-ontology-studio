@@ -1980,9 +1980,9 @@ window.__ModuleLoader__.load({
           h(Stat, { value: String((catalog.available || []).length), label: '市场可安装', delta: 'catalog 目录' }),
           h(Stat, { value: String((catalog.installed || []).length), label: '已安装', delta: '资产目录' }),
           h(Stat, {
-            value: String((catalog.available || []).filter(function (a) { return a.installed; }).length),
-            label: '已装在市场里的',
-            delta: '其余可安装',
+            value: String((catalog.available || []).filter(function (a) { return a.upgradable; }).length),
+            label: '可升级',
+            delta: '市场里有同 id 的新版本',
           }),
           h(Stat, {
             value: String(missing.length),
@@ -2013,8 +2013,9 @@ window.__ModuleLoader__.load({
               {
                 key: 'installed',
                 label: '状态',
-                width: '12%',
+                width: '16%',
                 render: function (r) {
+                  if (r.upgradable) return h(Badge, { tone: 'warn' }, '可升级 v' + (r.installedVersion || '?') + ' → v' + r.version);
                   return h(Badge, { tone: r.installed ? 'on' : '' }, r.installed ? '已安装' : r.ok ? '可安装' : '包不合法');
                 },
               },

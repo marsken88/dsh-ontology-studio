@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.22
+## 当前状态：v0.22.3
 
 | 部分 | 状态 |
 | --- | --- |
@@ -86,7 +86,7 @@
 | `ontology_install_asset` | **写** | 从 catalog 安装一个包，缺依赖则拒绝 |
 | `ontology_uninstall_asset` | **写** | 卸载一个包，被依赖则拒绝 |
 | `ontology_diff` | 读 | 对比两个包，按对象/关系/规则/动作/策略/Agent 分组 |
-| `ontology_upgrade` | **写** | 用市场里的同名新版本原位升级，记 op=upgrade |
+| `ontology_upgrade` | **写** | 用市场里的同名新版本原位升级（支持 dryRun），记 op=upgrade |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | **写** | 新增或替换一条对象关系 |
 | `ontology_delete_link` | **写** | 删除一条关系 |
@@ -583,7 +583,7 @@ ontology_asset_catalog
 ## 测试
 
 ```bash
-npm test        # 十七组，共 249 项断言
+npm test        # 十七组，共 250 项断言
 ```
 
 | 文件 | 覆盖 |

@@ -162,6 +162,18 @@ async function setup(options = {}) {
     assert.ok(history[history.length - 1].summary.includes('1.1.0'));
   });
 
+  await it('dryRun 只校验不写盘', async () => {
+    const { dir, tools } = await setup({ catalogVersion: true });
+    const beforeText = fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8');
+    const result = await tools.ontology_upgrade.execute({ packageId: 'retail.store-inventory', dryRun: true }, {});
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.to, '1.1.0');
+    assert.equal(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'), beforeText, 'dryRun 不得写盘');
+    const rendered = tools.ontology_upgrade.output.render({}, result)[0].text;
+    assert.ok(!rendered.includes('undefined'), 'dryRun 渲染不能出现 undefined：' + rendered);
+    assert.ok(rendered.includes('dryRun'), '应说明未写盘：' + rendered);
+  });
+
   await it('市场里没有其它版本时拒绝', async () => {
     const { tools } = await setup();
     const result = await tools.ontology_upgrade.execute({ packageId: 'retail.store-inventory' }, {});

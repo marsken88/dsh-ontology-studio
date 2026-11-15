@@ -26,7 +26,7 @@ import { diffPackages, describeDiff } from './lib/diff.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.22.0';
+const CODE_VERSION = '0.22.3';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1043,7 +1043,7 @@ export function apply(ctx, config = {}) {
         lines.push(`可安装（${(v.available || []).length}）：`);
         for (const a of v.available || []) {
           lines.push(
-            `  ${a.installed ? '✓ 已安装' : '· 可安装'} ${a.id} v${a.version} — ${a.objects} 对象 / ${a.rules} 规则 / ${a.actions} 动作${
+            `  ${a.upgradable ? '↑ 可升级 v' + a.installedVersion + ' → v' + a.version : a.installed ? '✓ 已安装' : '· 可安装'} ${a.id} v${a.version} — ${a.objects} 对象 / ${a.rules} 规则 / ${a.actions} 动作${
               a.dependsOn && a.dependsOn.length ? '；依赖 ' + a.dependsOn.join(', ') : ''
             }`
           );
@@ -1073,7 +1073,13 @@ export function apply(ctx, config = {}) {
       });
       return {
         ok: true,
-        available: state.available.map((entry) => Object.assign(shape(entry), { installed: entry.installed === true })),
+        available: state.available.map((entry) =>
+          Object.assign(shape(entry), {
+            installed: entry.installed === true,
+            installedVersion: entry.installedVersion || null,
+            upgradable: entry.upgradable === true,
+          })
+        ),
         installed: state.installed.map(shape),
         missingDeps: state.missingDeps,
       };
@@ -1370,7 +1376,10 @@ export function apply(ctx, config = {}) {
       },
       render: (_args, value) => {
         const v = value || {};
-        if (v.ok) return text(`已升级 ${v.packageId}：v${v.from} → v${v.to}（${v.summary}）→ ${v.file}`);
+        if (v.ok) {
+          const head = v.file ? '已升级' : '可升级（dryRun 未写盘）';
+          return text(`${head} ${v.packageId}：v${v.from} → v${v.to}（${v.summary}）${v.file ? ' → ' + v.file : ''}`);
+        }
         return text(`未升级：${v.message || '未知原因'}`);
       },
     },
@@ -1407,6 +1416,17 @@ export function apply(ctx, config = {}) {
       const diff = diffPackages(installed.entry.ir, candidate.ir);
       if (diff.identical) {
         return { ok: false, packageId: args.packageId, message: '新版本与已安装版本内容一致，无需升级' };
+      }
+      if (args.dryRun === true) {
+        return {
+          ok: true,
+          packageId: candidate.ir.id,
+          from: installed.entry.ir.version,
+          to: candidate.ir.version,
+          etag: installed.entry.etag,
+          summary: describeDiff(diff),
+          message: 'dryRun：校验通过，未写盘',
+        };
       }
       const saved = await store.save(installed.entry.file, candidate.ir, { ifEtag: args.ifEtag || installed.entry.etag });
       if (saved.conflict) {

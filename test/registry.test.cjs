@@ -67,9 +67,13 @@ async function loadTools(dir) {
 
   await it('列出可安装与已安装，并标注已装状态', async () => {
     const state = await catalogState({ catalogDir, assetsDir: tempAssets() });
-    assert.equal(state.available.length, 1);
-    assert.equal(state.available[0].ir.id, 'retail.member-loyalty');
-    assert.equal(state.available[0].installed, false);
+    assert.equal(state.available.length, 2, '市场里有会员包和库存包的 1.1.0');
+    const member = state.available.find((e) => e.ir.id === 'retail.member-loyalty');
+    assert.equal(member.installed, false);
+    const upgrade = state.available.find((e) => e.ir.id === 'retail.store-inventory');
+    assert.equal(upgrade.upgradable, true, '同 id 不同版本应标为可升级');
+    assert.equal(upgrade.installedVersion, '1.0.0');
+    assert.equal(upgrade.ir.version, '1.1.0');
     assert.equal(state.installed.length, 1);
     assert.equal(state.installed[0].ir.id, 'retail.store-inventory');
   });
@@ -116,7 +120,8 @@ async function loadTools(dir) {
     const result = await installAsset({ catalogDir, assetsDir: tempAssets() }, 'nope');
     assert.equal(result.ok, false);
     assert.equal(result.code, 'not-in-catalog');
-    assert.deepEqual(result.available, ['retail.member-loyalty']);
+    assert.ok(result.available.includes('retail.member-loyalty'));
+    assert.ok(result.available.includes('retail.store-inventory'));
   });
 
   console.log('\n卸载');
@@ -156,8 +161,8 @@ async function loadTools(dir) {
     }
     const cat = await tools.ontology_asset_catalog.execute({}, {});
     assert.equal(cat.ok, true);
-    assert.equal(cat.available.length, 1);
-    assert.equal(cat.available[0].installed, false);
+    assert.equal(cat.available.length, 2);
+    assert.ok(cat.available.every((a) => a.installed === false || a.upgradable === true));
 
     const install = await tools.ontology_install_asset.execute({ packageId: 'retail.member-loyalty' }, {});
     assert.equal(install.ok, true, install.message);
