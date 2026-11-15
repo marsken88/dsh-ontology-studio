@@ -27,11 +27,12 @@ import { draftFromSample } from './lib/sample.mjs';
 import { buildRegressionPlan } from './lib/regression.mjs';
 import { applyLint } from './lib/lint.mjs';
 import { focusOf, messageText } from './lib/focus.mjs';
+import { harnessCheck } from './lib/harness-check.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.32.0';
+const CODE_VERSION = '0.33.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1453,6 +1454,53 @@ export function apply(ctx, config = {}) {
         }),
         usage: { byTool, unattributed, scanned: entries.length, traceFile: trace.file },
       };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_harness_check  (read — is this ontology ready to be a base?)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_harness_check',
+    description:
+      '体检：这份本体作为 Agent 的底座还缺什么——结构（主键/关系/属性）、规则、可执行动作、审批护栏、事实数据、Agent 花名册六个方面逐项检查，缺口直接说要怎么补。不评分、不猜，只陈述文件里的事实。思路来自 Harness² 的组件分类。',
+    parameters: {
+      type: 'object',
+      properties: { packageId: { type: 'string' } },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          report: { type: 'object' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`体检失败：${v.message || '未知原因'}`);
+        const r = v.report;
+        const head =
+          r.verdict === 'ready'
+            ? `✓ ${r.packageId} 六个方面都齐了（${r.readyAreas}/${r.totalAreas}）`
+            : `△ ${r.packageId}：${r.readyAreas}/${r.totalAreas} 个方面就绪，${r.gaps.length} 处缺口`;
+        const lines = [head];
+        for (const g of r.gaps) {
+          lines.push(`- [${g.area}] ${g.title}`);
+          if (g.how) lines.push(`    怎么补：${g.how}`);
+        }
+        for (const n of r.notes) lines.push(`注意：${n}`);
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      const loaded = await loadRecords(entry.file);
+      return { ok: true, report: harnessCheck(entry.ir, { records: loaded.records || null }) };
     },
   });
 
