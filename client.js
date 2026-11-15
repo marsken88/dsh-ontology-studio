@@ -1828,6 +1828,15 @@ window.__ModuleLoader__.load({
                   fill: 'var(--dsw-alias-brand-primary, #4c8dff)',
                   style: { cursor: 'crosshair' },
                   onMouseDown: function (event) { startLinkDrag(event, o.id); },
+                }),
+                // 6px 圆点既难点也难拖：上面盖一个透明的更大命中区
+                h('circle', {
+                  cx: NODE_W,
+                  cy: NODE_H / 2,
+                  r: 14,
+                  fill: 'transparent',
+                  style: { cursor: 'crosshair' },
+                  onMouseDown: function (event) { startLinkDrag(event, o.id); },
                 })
               );
             })
