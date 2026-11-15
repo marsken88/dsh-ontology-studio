@@ -26,7 +26,7 @@ import { diffPackages, describeDiff } from './lib/diff.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.22.3';
+const CODE_VERSION = '0.23.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';

@@ -103,9 +103,11 @@ async function it(name, fn) {
   });
 
   await it('只有声明没有 effect 的动作不生成表单，并留一条提示', () => {
-    const page = generateAppSpec(ir, { objects: ['Inventory'] }).pages[0];
+    const stripped = JSON.parse(JSON.stringify(ir));
+    delete stripped.actions.find((a) => a.id === 'startStocktake').effect;
+    const page = generateAppSpec(stripped, { objects: ['Inventory'] }).pages[0];
     assert.ok(!page.actions.some((a) => a.actionId === 'startStocktake'));
-    assert.ok(generateAppSpec(ir, { objects: ['Inventory'] }).notes.some((n) => n.includes('只有声明')));
+    assert.ok(generateAppSpec(stripped, { objects: ['Inventory'] }).notes.some((n) => n.includes('只有声明')));
   });
 
   await it('没有可执行动作的对象页面不带操作', () => {

@@ -62,7 +62,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
 
   const ir = JSON.parse(fs.readFileSync(ASSET, 'utf8'));
   const adjust = ir.actions.find((a) => a.id === 'adjustInventory');
-  const stocktake = ir.actions.find((a) => a.id === 'startStocktake');
+  const declarationOnly = ir.actions.find((a) => a.id === 'createReplenishment');
 
   console.log('\nIR — 动作声明');
 
@@ -100,7 +100,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
   });
 
   await it('只有同时声明两者的动作才可执行', () => {
-    assert.deepEqual(executableActions(ir).map((a) => a.id), ['adjustInventory', 'createTransfer']);
+    assert.deepEqual(executableActions(ir).map((a) => a.id), ['adjustInventory', 'createTransfer', 'startStocktake']);
     assert.deepEqual(policiesFor(ir, 'createTransfer').map((p) => p.id).sort(), [
       'policy.crossRegion.transfer',
       'policy.inventory.writeApproval',
@@ -137,7 +137,7 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
   });
 
   await it('没有 inputSchema 的动作直接不可校验', () => {
-    const result = validateInput(stocktake, {});
+    const result = validateInput(declarationOnly, {});
     assert.equal(result.ok, false);
     assert.equal(result.problems[0].code, 'no-schema');
   });
@@ -228,12 +228,12 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
     const dir = tempAssets();
     const tools = await loadTools(dir);
     const result = await tools.ontology_execute_action.execute(
-      { packageId: 'retail.store-inventory', actionId: 'startStocktake', input: {} },
+      { packageId: 'retail.store-inventory', actionId: 'createReplenishment', input: {} },
       {}
     );
     assert.equal(result.ok, false);
     assert.ok(result.message.includes('还没有可执行的声明'));
-    assert.deepEqual(result.executable, ['adjustInventory', 'createTransfer']);
+    assert.deepEqual(result.executable, ['adjustInventory', 'createTransfer', 'startStocktake']);
   });
 
   await it('匹配不到行时如实报错，不伪造成功', async () => {
@@ -362,6 +362,24 @@ const readRecords = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'store-in
     const action = bad.actions.find((a) => a.id === 'adjustInventory');
     delete action.effect.set;
     assert.ok(validateIr(bad).problems.some((p) => p.code === 'no-operation'));
+  });
+
+  await it('执行结果的变更记录可无损 JSON 序列化（不能有 undefined）', async () => {
+    const dir = tempAssets();
+    const tools = await loadTools(dir);
+    const result = await tools.ontology_execute_action.execute(
+      {
+        packageId: 'retail.store-inventory',
+        actionId: 'startStocktake',
+        input: { storeId: 'S-0213', skuId: 'SKU-1001', lastStocktakeAt: '2026-11-15T10:00:00+08:00' },
+      },
+      {}
+    );
+    assert.equal(result.ok, true, result.message);
+    // 宿主会校验返回值能否无损序列化；undefined 会被静默丢弃，
+    // 结果是「工具报错，但写盘已经发生」——这是最糟的一种失败。
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+    assert.equal(result.changed[0].before.lastStocktakeAt, null, '不存在的旧值记为 null 而不是 undefined');
   });
 
   const total = pass + failures.length;

@@ -249,7 +249,7 @@ function fakeContext(options = {}) {
     );
     assert.equal(value.found, true);
     assert.equal(value.object.id, 'Inventory');
-    assert.equal(value.object.properties.length, 7);
+    assert.equal(value.object.properties.length, 8, 'Inventory 现在有 8 个属性（含 lastStocktakeAt）');
     assert.deepEqual(value.links.map((l) => l.target).sort(), ['Product', 'Store']);
     assert.deepEqual(value.actions.map((a) => a.id).sort(), [
       'adjustInventory',
