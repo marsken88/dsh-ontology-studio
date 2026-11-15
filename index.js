@@ -21,11 +21,12 @@ import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
+import { diffPackages, describeDiff } from './lib/diff.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.21.4';
+const CODE_VERSION = '0.22.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1275,6 +1276,167 @@ export function apply(ctx, config = {}) {
         ok: true,
         agents,
         usage: { byTool, unattributed, scanned: entries.length, traceFile: trace.file },
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_diff / ontology_upgrade
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_diff',
+    description:
+      '对比两个资产包（同一份本体的两个版本，或任意两个包）：按对象/关系/规则/动作/策略/Agent 分组列出新增、删除、变更。升级前先跑它，比只看版本号有用得多。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '对比的基准包' },
+        againstPackageId: { type: 'string', description: '要对比的目标包' },
+        againstSource: { type: 'string', description: '目标从哪里取：installed（默认）| catalog —— 同名包比版本时用 catalog' },
+      },
+      required: ['packageId', 'againstPackageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' }, diff: { type: 'object' }, summary: { type: 'string' }, message: { type: 'string' } },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`对比失败：${v.message || '未知原因'}`);
+        const d = v.diff;
+        const lines = [`${d.from.id}：v${d.from.version} → v${d.to.version}（${d.summary.added} 增 / ${d.summary.removed} 删 / ${d.summary.changed} 改）`];
+        for (const section of d.sections) {
+          const bits = [];
+          if (section.added.length) bits.push('新增 ' + section.added.join(', '));
+          if (section.removed.length) bits.push('删除 ' + section.removed.join(', '));
+          for (const change of section.changed) {
+            bits.push(change.id + '：' + change.changes.map((c) => (c.field === 'property' ? (c.op === 'added' ? '+' : '-') + c.name : c.field)).join(', '));
+          }
+          if (bits.length) lines.push(`${section.collection}：${bits.join('；')}`);
+        }
+        if (d.identical) lines.push('两个版本完全一致');
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const from = await store.get(args.packageId);
+      if (!from.entry || !from.entry.ir) return { ok: false, message: `基准包不存在：${args.packageId}` };
+
+      // Same-id packages exist in both places when a newer version is on offer,
+      // so the source has to be explicit.
+      let target = null;
+      if (args.againstSource !== 'catalog') {
+        const to = await store.get(args.againstPackageId);
+        target = to.entry && to.entry.ir ? to.entry.ir : null;
+      }
+      if (!target) {
+        const state = await catalogState({ catalogDir, assetsDir: store.dir });
+        const hit = state.available.find((e) => e.ir && e.ir.id === args.againstPackageId);
+        target = hit ? hit.ir : null;
+      }
+      if (!target) return { ok: false, message: `目标包不存在：${args.againstPackageId}` };
+
+      const diff = diffPackages(from.entry.ir, target);
+      return { ok: true, diff, summary: describeDiff(diff) };
+    },
+  });
+
+  registerWrite({
+    name: 'ontology_upgrade',
+    description:
+      '用资产市场里的同名包升级已安装的包：校验新版本后原位覆盖，并把 op=upgrade 记进变更历史。市场里没有同 id 的其它版本时拒绝。',
+    parameters: {
+      type: 'object',
+      properties: { packageId: { type: 'string' } },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          from: { type: 'string' },
+          to: { type: 'string' },
+          file: { type: 'string' },
+          etag: { type: 'string' },
+          summary: { type: 'string' },
+          problems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok) return text(`已升级 ${v.packageId}：v${v.from} → v${v.to}（${v.summary}）→ ${v.file}`);
+        return text(`未升级：${v.message || '未知原因'}`);
+      },
+    },
+    execute: async (args, exec) => {
+      const installed = await store.get(args.packageId);
+      if (!installed.entry || !installed.entry.ir) {
+        return { ok: false, packageId: args.packageId, message: `没有安装这个包：${args.packageId}` };
+      }
+      const state = await catalogState({ catalogDir, assetsDir: store.dir });
+      const candidate = state.available.find(
+        (e) => e.ir && e.ir.id === args.packageId && e.ir.version !== installed.entry.ir.version
+      );
+      if (!candidate) {
+        return {
+          ok: false,
+          packageId: args.packageId,
+          message: `资产市场里没有 ${args.packageId} 的其它版本（当前 v${installed.entry.ir.version}）`,
+        };
+      }
+      if (!candidate.ok) {
+        return { ok: false, packageId: args.packageId, problems: candidate.problems, message: '新版本未通过校验，拒绝升级' };
+      }
+
+      const gate = await gateWrite(exec, {
+        toolName: 'ontology_upgrade',
+        destructive: true,
+        dryRun: args.dryRun === true,
+        reason: `升级 ${args.packageId}：v${installed.entry.ir.version} → v${candidate.ir.version}`,
+      });
+      if (!gate.allowed) {
+        return { ok: false, packageId: args.packageId, approval: gate.outcome, message: gate.message };
+      }
+
+      const diff = diffPackages(installed.entry.ir, candidate.ir);
+      if (diff.identical) {
+        return { ok: false, packageId: args.packageId, message: '新版本与已安装版本内容一致，无需升级' };
+      }
+      const saved = await store.save(installed.entry.file, candidate.ir, { ifEtag: args.ifEtag || installed.entry.etag });
+      if (saved.conflict) {
+        return {
+          ok: false,
+          packageId: args.packageId,
+          conflict: true,
+          etag: saved.etag,
+          problems: saved.problems,
+          message: '资产已被修改，请重新读取后再升级',
+        };
+      }
+      await noteHistory({
+        ts: Date.now(),
+        packageId: candidate.ir.id,
+        version: candidate.ir.version,
+        op: 'upgrade',
+        target: candidate.ir.id,
+        summary: `升级 v${installed.entry.ir.version} → v${candidate.ir.version}（${describeDiff(diff)}）`,
+        etag: saved.etag,
+      });
+      return {
+        ok: saved.ok,
+        packageId: candidate.ir.id,
+        from: installed.entry.ir.version,
+        to: candidate.ir.version,
+        file: saved.file,
+        etag: saved.etag,
+        summary: describeDiff(diff),
+        problems: saved.problems,
       };
     },
   });
