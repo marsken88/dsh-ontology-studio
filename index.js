@@ -30,7 +30,7 @@ import { focusOf, messageText } from './lib/focus.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.27.0';
+const CODE_VERSION = '0.28.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1833,16 +1833,40 @@ export function apply(ctx, config = {}) {
       if (args.dryRun) {
         return { ok: true, action, objectId: args.object.id, packageId: ir.id, version: ir.version, etag: entry.etag, message: 'dryRun：校验通过，未写盘' };
       }
-      const saved = await store.save(entry.file, ir, { ifEtag: args.ifEtag || entry.etag });
-      if (saved.conflict) {
+
+      // Read-modify-write under the file lock: concurrent adds must queue, not
+      // fight over compare-and-swap. An explicit ifEtag still takes precedence.
+      const applied = await store.update(
+        entry.file,
+        (draft) => {
+          const list = Array.isArray(draft.objects) ? draft.objects : (draft.objects = []);
+          const at = list.findIndex((o) => o.id === args.object.id);
+          if (at >= 0) list[at] = args.object;
+          else list.push(args.object);
+          return { ok: true, action };
+        },
+        { ifEtag: args.ifEtag }
+      );
+      if (applied.conflict) {
         return {
           ok: false,
           conflict: true,
-          etag: saved.etag,
-          problems: saved.problems,
+          etag: applied.etag,
+          problems: applied.problems,
           message: '资产已被修改，请重新读取（ontology_get）后再写入',
         };
       }
+      if (!applied.ok) {
+        return {
+          ok: false,
+          action,
+          objectId: args.object.id,
+          version: ir.version,
+          problems: applied.problems,
+          message: '写入会让本体包失效',
+        };
+      }
+      const saved = applied;
       await noteHistory({ ts: Date.now(), packageId: ir.id, version: ir.version, op: 'upsert_object', target: args.object.id, summary: (action === 'created' ? '新增对象 ' : '更新对象 ') + args.object.id, etag: saved.etag });
       return {
         ok: saved.ok,

@@ -143,53 +143,52 @@ function newObject(id) {
 
   console.log('\n工具层：并发写入必须有人失败');
 
-  await it('五路并发新增对象时，只有一个成功，其余报告冲突', async () => {
+  await it('五路并发新增对象：全部成功，一个都不丢', async () => {
     const dir = tempAssets();
     const tools = await loadTools(dir);
+    const ids = ['W1', 'W2', 'W3', 'W4', 'W5'];
     const results = await Promise.all(
-      ['W1', 'W2', 'W3', 'W4', 'W5'].map((id) =>
-        tools.ontology_upsert_object.execute(
-          { packageId: 'retail.store-inventory', object: newObject(id) },
-          {}
-        )
-      )
+      ids.map((id) => tools.ontology_upsert_object.execute({ packageId: 'retail.store-inventory', object: newObject(id) }, {}))
     );
-    const okCount = results.filter((r) => r.ok).length;
-    const conflicts = results.filter((r) => r.conflict === true);
-    assert.equal(okCount, 1, '并发下应当只有一个写入成功，实际 ' + okCount);
-    assert.equal(conflicts.length, 4);
-    assert.ok(conflicts.every((r) => typeof r.etag === 'string' && r.message.includes('重新读取')));
+    // 新增对象是可串行化操作：读-改-写整体在文件锁内完成，所以并发不是争抢
+    // 而是排队。旧实现只锁写入，导致五路里四路报冲突。
+    assert.equal(results.filter((r) => r.ok).length, 5, JSON.stringify(results.filter((r) => !r.ok).map((r) => r.message)));
 
     const saved = readIr(dir);
-    assert.equal(saved.objects.length, 7, '只能多出一个对象，不能丢也不能多');
-    assert.ok(['W1', 'W2', 'W3', 'W4', 'W5'].some((id) => saved.objects.some((o) => o.id === id)));
+    const added = saved.objects.filter((o) => ids.includes(o.id));
+    assert.equal(added.length, 5, '五个对象必须都在，丢一个就是 lost update');
+    assert.equal(saved.objects.length, 11, '6 个原有 + 5 个新增');
   });
 
-  await it('冲突后用返回的 etag 重试即可成功（文档里写的恢复路径）', async () => {
+  await it('显式 ifEtag 仍然优先：拿着旧 etag 写会被拒绝', async () => {
     const dir = tempAssets();
     const tools = await loadTools(dir);
-    const results = await Promise.all(
-      ['W1', 'W2'].map((id) =>
-        tools.ontology_upsert_object.execute({ packageId: 'retail.store-inventory', object: newObject(id) }, {})
-      )
+    const first = await tools.ontology_upsert_object.execute(
+      { packageId: 'retail.store-inventory', object: newObject('W1') },
+      {}
     );
-    const failed = results.find((r) => r.conflict === true);
-    assert.ok(failed, '两路并发应当有一路冲突');
+    assert.equal(first.ok, true);
+    const stale = first.etag;
 
+    // 再写一次，然后拿已经过期的 etag 试图覆盖
+    await tools.ontology_upsert_object.execute({ packageId: 'retail.store-inventory', object: newObject('W2') }, {});
+    const rejected = await tools.ontology_upsert_object.execute(
+      { packageId: 'retail.store-inventory', object: newObject('W9'), ifEtag: stale },
+      {}
+    );
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.conflict, true);
+    assert.ok(rejected.message.includes('重新读取'));
+    assert.ok(!readIr(dir).objects.some((o) => o.id === 'W9'), '冲突时不得写入');
+
+    // 用返回的最新 etag 重试即可成功
     const retry = await tools.ontology_upsert_object.execute(
-      {
-        packageId: 'retail.store-inventory',
-        object: newObject('W9'),
-        ifEtag: failed.etag,
-      },
+      { packageId: 'retail.store-inventory', object: newObject('W9'), ifEtag: rejected.etag },
       {}
     );
     assert.equal(retry.ok, true, JSON.stringify(retry.problems));
-    const saved = readIr(dir);
-    assert.ok(saved.objects.some((o) => o.id === 'W9'));
-    assert.equal(saved.objects.length, 8);
+    assert.ok(readIr(dir).objects.some((o) => o.id === 'W9'));
   });
-
   await it('顺序写入（每次都重新读取）不受影响', async () => {
     const dir = tempAssets();
     const tools = await loadTools(dir);
