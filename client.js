@@ -679,6 +679,7 @@ window.__ModuleLoader__.load({
     const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
 
     function useOntologyState() {
+      const [nonce, setNonce] = useState(0);
       const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null, appSpec: null, agents: null });
       useEffect(function () {
         let alive = true;
@@ -754,8 +755,14 @@ window.__ModuleLoader__.load({
         return function () {
           alive = false;
         };
-      }, []);
-      return state;
+      }, [nonce]);
+      /** Re-read everything from the Host; Agent writes make the panel stale. */
+      const reload = function () {
+        setNonce(function (n) {
+          return n + 1;
+        });
+      };
+      return [state, reload];
     }
 
     /** Project one IR object onto the shape the pages render. */
@@ -891,7 +898,9 @@ window.__ModuleLoader__.load({
           h(Stat, {
             value: String(model.objects.length),
             label: '本体对象',
-            delta: published + ' 已发布 · ' + (model.objects.length - published) + ' 草稿',
+            delta: model.live
+              ? (model.pkg ? (model.pkg.objects || []).reduce(function (n, o) { return n + (o.properties || []).length; }, 0) + ' 个属性' : '—')
+              : published + ' 已发布 · ' + (model.objects.length - published) + ' 草稿',
           }),
           h(Stat, { value: String(model.rules), label: '业务规则', delta: model.live ? '来自当前资产包' : '演示数据' }),
           h(Stat, { value: String(model.actions), label: '业务动作', delta: model.live ? '含审批标记' : '演示数据' }),
@@ -945,39 +954,70 @@ window.__ModuleLoader__.load({
           { className: 'os-grid os-g2' },
           h(
             Card,
-            { title: '近期变更', flush: true },
+            { title: '近期变更', sub: model.live ? '来自 .ontology-history.jsonl' : '演示数据', flush: true },
             h(
               'div',
               { style: { padding: '4px 14px 10px' } },
-              [
-                ['10 分钟前', 'Inventory.safetyStock 新增', '供应链数字化组'],
-                ['1 小时前', '补货准确率评测通过 87%', '系统'],
-                ['3 小时前', '发布 retail.store-inventory 1.0.0', '供应链数字化组'],
-                ['昨天', '商品中心 API 映射完成 72%', '商品中心'],
-              ].map((r) =>
-                h(
-                  'div',
-                  { key: r[1], className: 'os-row' },
-                  h('span', { className: 'os-grow' }, r[1]),
-                  h('span', { className: 'os-muted os-mono' }, r[0])
-                )
-              )
+              model.live
+                ? (model.history || []).slice(0, 5).map(function (e, i) {
+                    return h(
+                      'div',
+                      { key: i, className: 'os-row' },
+                      h('span', { className: 'os-grow' }, e.summary || e.op),
+                      h('span', { className: 'os-muted os-mono' }, 'v' + (e.version || '?'))
+                    );
+                  }).concat(
+                    (model.history || []).length
+                      ? []
+                      : [h('div', { key: 'none', className: 'os-row os-muted' }, '还没有变更记录：这个包还没被改过。')]
+                  )
+                : [
+                    ['10 分钟前', 'Inventory.safetyStock 新增', '供应链数字化组'],
+                    ['1 小时前', '补货准确率评测通过 87%', '系统'],
+                    ['3 小时前', '发布 retail.store-inventory 1.0.0', '供应链数字化组'],
+                    ['昨天', '商品中心 API 映射完成 72%', '商品中心'],
+                  ].map((r) =>
+                    h(
+                      'div',
+                      { key: r[1], className: 'os-row' },
+                      h('span', { className: 'os-grow' }, r[1]),
+                      h('span', { className: 'os-muted os-mono' }, r[0])
+                    )
+                  )
             )
           ),
           h(
             Card,
-            { title: '待处理', flush: true },
+            {
+              title: model.live ? '需要审批的动作' : '待处理',
+              sub: model.live ? '来自本体声明，不是待办队列' : '演示数据',
+              flush: true,
+            },
             h(
               'div',
               { style: { padding: '4px 14px 10px' } },
-              APPROVALS.filter((a) => a[3] === '待审批').map((a) =>
-                h(
-                  'div',
-                  { key: a[0], className: 'os-row' },
-                  h('span', { className: 'os-grow' }, a[0]),
-                  h(Badge, { tone: a[4] === 'urgent' ? 'err' : 'warn' }, a[3])
-                )
-              )
+              model.live
+                ? (model.pkg && model.pkg.actions ? model.pkg.actions : [])
+                    .filter(function (a) {
+                      return a.approvalRequired === true;
+                    })
+                    .map(function (a) {
+                      const executable = Boolean(a.effect && Array.isArray(a.inputSchema) && a.inputSchema.length);
+                      return h(
+                        'div',
+                        { key: a.id, className: 'os-row' },
+                        h('span', { className: 'os-grow' }, a.name + '（' + a.id + '）'),
+                        h(Badge, { tone: executable ? 'warn' : '' }, executable ? '需审批' : '仅声明')
+                      );
+                    })
+                : APPROVALS.filter((a) => a[3] === '待审批').map((a) =>
+                    h(
+                      'div',
+                      { key: a[0], className: 'os-row' },
+                      h('span', { className: 'os-grow' }, a[0]),
+                      h(Badge, { tone: a[4] === 'urgent' ? 'err' : 'warn' }, a[3])
+                    )
+                  )
             )
           )
         ),
@@ -2271,7 +2311,9 @@ window.__ModuleLoader__.load({
 
     function OntologyStudio() {
       const [page, setPage] = useState('overview');
-      const ontology = useOntologyState();
+      const pair = useOntologyState();
+      const ontology = pair[0];
+      const reload = pair[1];
       const model = useMemo(function () {
         return buildModel(ontology);
       }, [ontology]);
@@ -2281,6 +2323,16 @@ window.__ModuleLoader__.load({
         },
         [page, model.live]
       );
+      useEffect(function () {
+        if (typeof window === 'undefined' || !window.addEventListener) return function () {};
+        const onFocus = function () {
+          reload();
+        };
+        window.addEventListener('focus', onFocus);
+        return function () {
+          window.removeEventListener('focus', onFocus);
+        };
+      }, []);
       const meta = PAGE[page] || PAGE.overview;
       const Body = PAGES[page] || OverviewPage;
       const pkgBadge = model.pkg
@@ -2341,7 +2393,11 @@ window.__ModuleLoader__.load({
               ? h(Badge, { tone: 'warn' }, model.approval === 'all' ? '写入需审批' : '删除/发布需审批')
               : null,
             model.problems.length ? h(Badge, { tone: 'err' }, model.problems.length + ' 个校验问题') : null,
-            h('button', { type: 'button', className: 'os-btn', disabled: true }, '切换环境：生产'),
+            h(
+              'button',
+              { type: 'button', className: 'os-btn', onClick: reload, title: '重新读取宿主的资产、事实数据、历史、轨迹与市场' },
+              '刷新'
+            ),
             h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产')
           ),
           h(

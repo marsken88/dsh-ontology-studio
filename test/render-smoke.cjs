@@ -172,7 +172,7 @@ React.__setLive({
   ],
 });
 const expectations = {
-  overview: ['实时资产', ir.id, '已发布'],
+  overview: ['实时资产', ir.id, '刷新', '需要审批的动作'],
   ontology: ['Inventory', 'availableQty', 'belongsTo'],
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明'],
