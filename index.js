@@ -22,11 +22,15 @@ import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
+import { draftFromSample } from './lib/sample.mjs';
+import { buildRegressionPlan } from './lib/regression.mjs';
+import { applyLint } from './lib/lint.mjs';
+import { focusOf, messageText } from './lib/focus.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.23.1';
+const CODE_VERSION = '0.25.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -88,6 +92,13 @@ export function apply(ctx, config = {}) {
   const contextMode = ['off', 'brief', 'full'].includes(config.context) ? config.context : 'brief';
   const contextMaxChars = Number.isFinite(config.contextMaxChars) ? config.contextMaxChars : 4000;
   let briefCache = '';
+  /** Task-layer focus: which objects the current turn seems to be about. */
+  let lastFocus = null;
+  /** How many times the observer actually ran (proof it is wired, not just registered). */
+  let focusRuns = 0;
+  let focusWired = false;
+  let focusWhy = '未注册';
+  const FOCUS_TTL_MS = 5 * 60 * 1000;
 
   async function refreshBrief() {
     if (contextMode === 'off') return;
@@ -100,16 +111,58 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  // Task-layer focus lives in lib/focus.mjs so it can be tested on its own.
+
   if (contextMode !== 'off') {
     void refreshBrief();
+
+    // Observe-only: this listener never edits the step's messages. It only notes
+    // what the turn looks like so the brief can add one advisory line.
+    if (typeof ctx.on === 'function') {
+      focusWired = true;
+      focusWhy = '已注册';
+    } else {
+      focusWhy = 'ctx 上没有 on()，无法监听 agent/pre-step';
+    }
+    if (focusWired) {
+      ctx.effect(() => {
+        const onPreStep = async (payload, next) => {
+          focusRuns += 1;
+          try {
+            const { entries } = await store.list();
+            const healthy = entries.filter((entry) => entry.ok && entry.ir)[0];
+            if (healthy) {
+              const focused = focusOf(healthy.ir, messageText(payload && payload.messages));
+              lastFocus = focused.length
+                ? { objects: focused, at: Date.now(), agent: payload && payload.agent ? String(payload.agent.id) : null }
+                : null;
+            }
+          } catch {
+            /* observation must never disturb the step */
+          }
+          return next();
+        };
+        ctx.on('agent/pre-step', onPreStep);
+        return () => {
+          if (typeof ctx.off === 'function') ctx.off('agent/pre-step', onPreStep);
+        };
+      });
+    }
+
     let disposeSection;
     ctx.inject(['systemPrompt'], (sysCtx) => {
       disposeSection = sysCtx.systemPrompt.section({
         name: 'ontology-studio',
         order: 700,
-        text: () => briefCache || '（本体资产尚未加载完成；用 ontology_list 查看当前资产包。）',
+        text: () => {
+          const base = briefCache || '（本体资产尚未加载完成；用 ontology_list 查看当前资产包。）';
+          if (!lastFocus || Date.now() - lastFocus.at > FOCUS_TTL_MS) return base;
+          const names = lastFocus.objects.map((o) => `${o.id}（${o.name}）`).join('、');
+          return base + `\n\n> 本轮可能相关：${names}。需要细节时用 ontology_get 取。`;
+        },
       });
     });
+
     ctx.effect(() => () => {
       if (typeof disposeSection === 'function') disposeSection();
     });
@@ -481,7 +534,12 @@ export function apply(ctx, config = {}) {
       },
       render: (_args, value) => {
         const v = value || {};
-        if (v.ok) return text(`✓ ${(v.checked || []).length} 个本体包全部通过校验（${v.dir}）`);
+        if (v.ok) {
+          const extraLint = (v.lint || []).length
+            ? `\n另有 ${v.lint.length} 条团队约定建议（不阻断写入）：\n` + v.lint.map((p) => `  [${p.code}] ${p.path} — ${p.message}`).join('\n')
+            : '';
+          return text(`✓ ${(v.checked || []).length} 个本体包全部通过校验（${v.dir}）` + extraLint);
+        }
         return text(
           lines([
             `✗ 发现 ${(v.problems || []).length} 个问题：`,
@@ -508,11 +566,22 @@ export function apply(ctx, config = {}) {
           problems.push({ package: packageId, path: p.path, code: p.code, message: p.message });
         }
       }
+      // Team conventions (config.lintRules) are reported separately: they never
+      // block a write, because a convention must not be able to wedge the platform.
+      const lint = [];
+      for (const entry of scope) {
+        if (!entry.ir) continue;
+        for (const p of applyLint(entry.ir, config.lintRules)) {
+          lint.push(Object.assign({ package: entry.ir.id }, p));
+        }
+      }
+
       return {
         ok: problems.length === 0,
         dir,
         checked: scope.map((e) => (e.ir ? e.ir.id : e.file)),
         problems,
+        lint,
       };
     },
   });
@@ -866,6 +935,18 @@ export function apply(ctx, config = {}) {
         );
       } catch (error) {
         add('资产市场', 'warn', `读取失败：${error.message}`);
+      }
+
+      // Task-layer focus is fresh-only; showing it makes the mechanism observable
+      // instead of something you have to take on faith.
+      if (contextMode === 'off') {
+        add('上下文聚焦', 'warn', 'context: off，未启用');
+      } else if (!lastFocus) {
+        add('上下文聚焦', focusRuns ? 'ok' : 'warn', `${focusWhy}；已观察 ${focusRuns} 轮；最近一轮没有提到任何对象`);
+      } else if (Date.now() - lastFocus.at > FOCUS_TTL_MS) {
+        add('上下文聚焦', 'ok', `上一轮聚焦已过期（${lastFocus.objects.map((o) => o.id).join(', ')}）`);
+      } else {
+        add('上下文聚焦', 'ok', `已观察 ${focusRuns} 轮；上一轮提到：${lastFocus.objects.map((o) => o.id + '(' + o.score + ')').join(', ')}`);
       }
 
       const failing = checks.filter((c) => c.status === 'fail');
@@ -1278,9 +1359,14 @@ export function apply(ctx, config = {}) {
           if (a.tools && a.tools.length) lines.push(`  工具：${a.tools.join(', ')}`);
           if (a.actions && a.actions.length) lines.push(`  动作：${a.actions.join(', ')}`);
           if (a.evalTarget) lines.push(`  评测口径：${a.evalTarget}`);
+          const metric = (v.metrics || []).find((m) => m.id === a.id) || {};
           lines.push(
             `  实际调用：${calls ? Object.entries(use).map(([t, s]) => t + ' ' + (s.ok + s.fail) + ' 次').join('；') : '轨迹里没有这个 Agent 的调用'}`
           );
+          if (typeof metric.successRate === 'number') lines.push(`  成功率：${metric.successRate}%（${metric.calls} 次，失败 ${metric.fails}）`);
+          if (metric.unusedDeclaredTools && metric.unusedDeclaredTools.length) {
+            lines.push(`  声明了但没用过：${metric.unusedDeclaredTools.join(', ')}`);
+          }
         }
         if (v.usage.unattributed) {
           lines.push(`\n轨迹中无法归属到声明 Agent 的调用：${v.usage.unattributed} 次`);
@@ -1312,6 +1398,27 @@ export function apply(ctx, config = {}) {
       return {
         ok: true,
         agents,
+        metrics: agents.map((agent) => {
+          const per = byTool[agent.id] || {};
+          const tools = Object.keys(per).map((tool) => ({
+            tool,
+            ok: per[tool].ok,
+            fail: per[tool].fail,
+            successRate: per[tool].ok + per[tool].fail ? Math.round((per[tool].ok / (per[tool].ok + per[tool].fail)) * 100) : null,
+          }));
+          const calls = tools.reduce((n, t) => n + t.ok + t.fail, 0);
+          const fails = tools.reduce((n, t) => n + t.fail, 0);
+          return {
+            id: agent.id,
+            name: agent.name,
+            calls,
+            fails,
+            successRate: calls ? Math.round(((calls - fails) / calls) * 100) : null,
+            tools: tools.sort((a, b) => b.ok + b.fail - (a.ok + a.fail)),
+            declaredTools: (agent.tools || []).length,
+            unusedDeclaredTools: (agent.tools || []).filter((name) => !per[name]),
+          };
+        }),
         usage: { byTool, unattributed, scanned: entries.length, traceFile: trace.file },
       };
     },
@@ -1489,6 +1596,129 @@ export function apply(ctx, config = {}) {
         summary: describeDiff(diff),
         problems: saved.problems,
       };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_draft_from_payload  (read — reverse model from a JSON sample)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_draft_from_payload',
+    description:
+      '反向建模（样例报文）：给一段真实的接口返回/消息样例，推断出本体对象草稿——按值判类型、键名归一、推断主键、从 *Id 字段推关系。只生成不写盘，确认后用 ontology_upsert_object 落库。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        sample: { type: 'object', description: '一段代表性的 JSON 对象或对象数组' },
+        objectId: { type: 'string', description: '建议的对象 id（PascalCase 或 kebab），默认 SampleObject' },
+        name: { type: 'string', description: '对象中文名' },
+      },
+      required: ['packageId', 'sample'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          object: { type: 'object' },
+          links: { type: 'array' },
+          nested: { type: 'array' },
+          problems: { type: 'array' },
+          valid: { type: 'boolean' },
+          validationProblems: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`生成失败：${v.message || '未知原因'}`);
+        const lines = [
+          `草稿对象 ${v.object.id}（${v.object.name}）：${v.object.properties.length} 个属性，主键 ${(v.object.keys || []).join('+') || '未识别'}`,
+          ...v.object.properties.map((p) => `  - ${p.name}（${p.label}）: ${p.type}`),
+          v.links && v.links.length ? `关系建议：${v.links.map((l) => l.id + ' → ' + l.target).join(', ')}` : '关系建议：无',
+          v.nested && v.nested.length ? `抽出的嵌套对象：${v.nested.map((n) => n.id).join(', ')}` : '',
+          v.valid ? '预校验：并入后整包仍然合法' : '预校验：并入后不合法',
+          ...(v.problems || []).map((p) => `注意 [${p.code}] ${p.message}`),
+        ];
+        return text(lines.filter(Boolean).join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+
+      const draft = draftFromSample(args.sample, {
+        objects: entry.ir.objects,
+        objectId: args.objectId,
+        name: args.name,
+      });
+      if (!draft.object) {
+        return { ok: false, problems: draft.problems, message: (draft.problems[0] || {}).message || '无法生成' };
+      }
+      const check = validateDraft(entry.ir, draft);
+      const validation = validateIr(JSON.parse(JSON.stringify(check.candidate)));
+      return {
+        ok: true,
+        object: draft.object,
+        links: draft.links,
+        nested: draft.nested,
+        problems: draft.problems,
+        valid: validation.ok,
+        validationProblems: validation.problems,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_regression_plan  (read — what to re-verify after a change)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_regression_plan',
+    description:
+      '改动某个对象后，生成需要重新验证的具体清单：哪些规则要在数据上重跑、哪些动作要重跑、哪些关系要复查、哪些 Agent 受影响、哪些产物要重新生成。比笼统一句「记得回归」有用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        objectId: { type: 'string' },
+        change: { type: 'string', description: '可选：这次改了什么，会写进清单标题' },
+      },
+      required: ['packageId', 'objectId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' }, plan: { type: 'object' }, message: { type: 'string' } },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`生成失败：${v.message || '未知原因'}`);
+        const plan = v.plan;
+        const lines = [
+          `${plan.objectId} 的回归清单（${plan.items.length} 项）${plan.change ? '：' + plan.change : ''}`,
+        ];
+        for (const item of plan.items) {
+          lines.push(`- [${item.kind}] ${item.title}`);
+          if (item.detail) lines.push(`    ${item.detail}`);
+          if (item.how && item.how !== '—') lines.push(`    怎么验：${item.how}`);
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      const plan = buildRegressionPlan(entry.ir, args.objectId, { change: args.change });
+      if (!plan) {
+        return {
+          ok: false,
+          message: `对象不存在：${args.objectId}。可用对象：${(entry.ir.objects || []).map((o) => o.id).join(', ')}`,
+        };
+      }
+      return { ok: true, plan };
     },
   });
 
