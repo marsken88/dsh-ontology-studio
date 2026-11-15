@@ -1,0 +1,67 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # No runtime dependencies: the plugin ships plain ESM/CJS and the suite uses
+      # only node:assert, so nothing needs installing.
+      - name: Run the suite
+        run: npm test
+
+      - name: Check the host half registers its tools
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            import { apply } from './index.js';
+            const registered = [];
+            const ctx = {
+              tools: { register: (d) => { registered.push(d.name); return () => {}; } },
+              effect: (run) => run(),
+              inject: () => () => {},
+              get: () => undefined,
+              on: () => {},
+              off: () => {},
+            };
+            apply(ctx, { assetsDir: './assets', trace: false });
+            // Compare against the number of tools the source declares, so adding a
+            // tool never breaks CI while dropping one still does.
+            const source = readFileSync('index.js', 'utf8');
+            const declared = (source.match(/name: 'ontology_[a-z_]+'/g) || []).length;
+            if (registered.length !== declared) {
+              throw new Error('registered ' + registered.length + ' of ' + declared + ' declared tools');
+            }
+            console.log('registered', registered.length, 'tools');
+          "
+
+      - name: Validate the bundled assets
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            import { validateIr } from './lib/ir.mjs';
+            const files = [
+              'assets/store-inventory.ir.json',
+              'catalog/member-loyalty.ir.json',
+              'catalog/store-inventory@1.1.0.ir.json',
+            ];
+            for (const file of files) {
+              const ir = JSON.parse(readFileSync(file, 'utf8'));
+              const { ok, problems } = validateIr(ir);
+              if (!ok) throw new Error(file + ': ' + JSON.stringify(problems));
+              console.log('ok', file, 'v' + ir.version);
+            }
+          "

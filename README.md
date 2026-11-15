@@ -1,5 +1,7 @@
 # Ontology Studio
 
+[![test](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml/badge.svg)](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml)
+
 企业级 Ontology + Harness 平台的落地工程。目标不是做一个「本体建模页面」，而是：
 
 > Ontology 是企业业务语义底座，Harness 是智能执行底座，Studio 是资产生产和管理入口，Marketplace 是能力复用机制，Governance 是平台运行保障。

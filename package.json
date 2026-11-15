@@ -3,7 +3,7 @@
   "version": "0.25.0",
   "private": true,
   "type": "module",
-  "description": "Ontology Studio — enterprise semantic modeling and Harness execution platform shell inside the DeepSeek Harness Web GUI (8 studios, unified navigation, demo data).",
+  "description": "Ontology Studio for DeepSeek Harness: model business objects as IR, validate them, evaluate rules, execute declarative actions behind an approval gate, install/upgrade packages, and drive it all from an Agent or a panel.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -38,5 +38,22 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "ontology",
+    "semantic-model",
+    "agent",
+    "approval",
+    "ir"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marsken88/dsh-ontology-studio.git"
+  },
+  "homepage": "https://github.com/marsken88/dsh-ontology-studio#readme",
+  "bugs": {
+    "url": "https://github.com/marsken88/dsh-ontology-studio/issues"
   }
 }
