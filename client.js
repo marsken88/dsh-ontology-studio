@@ -679,7 +679,7 @@ window.__ModuleLoader__.load({
     const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
 
     function useOntologyState() {
-      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [] });
+      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null });
       useEffect(function () {
         let alive = true;
         const get = function (path) {
@@ -690,7 +690,7 @@ window.__ModuleLoader__.load({
           );
         };
         if (typeof fetch !== 'function') {
-          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null, history: [] });
+          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null, history: [], catalog: null });
           return function () {};
         }
         get('/status')
@@ -699,7 +699,7 @@ window.__ModuleLoader__.load({
             const value = body && body.value;
             const first = value && value.packages ? value.packages.filter(function (p) { return p.ok; })[0] : null;
             if (!first) {
-              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null, history: [] });
+              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null });
               return null;
             }
             return get('/package?id=' + encodeURIComponent(first.id)).then(function (pkg) {
@@ -713,11 +713,15 @@ window.__ModuleLoader__.load({
                 get('/history?id=' + encodeURIComponent(first.id) + '&limit=40').catch(function () {
                   return { value: { entries: [] } };
                 }),
+                get('/catalog').catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
                 const records = (both[1] && both[1].value) || null;
                 const historyEntries = (both[2] && both[2].value && both[2].value.entries) || [];
+                const catalog = (both[3] && both[3].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -727,13 +731,14 @@ window.__ModuleLoader__.load({
                   traces: entries,
                   records: records,
                   history: historyEntries,
+                  catalog: catalog,
                 });
               });
             });
           })
           .catch(function (error) {
             if (alive) {
-              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null, history: [] });
+              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null, history: [], catalog: null });
             }
           });
         return function () {
@@ -819,6 +824,7 @@ window.__ModuleLoader__.load({
           traces: state.traces || [],
           records: state.records || null,
           history: state.history || [],
+          catalog: state.catalog || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -838,6 +844,7 @@ window.__ModuleLoader__.load({
         traces: [],
         records: null,
         history: [],
+        catalog: null,
         dir: null,
         file: null,
         problems: [],
@@ -1698,7 +1705,84 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function MarketplacePage() {
+    function MarketplaceLivePage(props) {
+      const model = props.model;
+      const catalog = model.catalog || { available: [], installed: [], missingDeps: [] };
+      const missing = catalog.missingDeps || [];
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: String((catalog.available || []).length), label: '市场可安装', delta: 'catalog 目录' }),
+          h(Stat, { value: String((catalog.installed || []).length), label: '已安装', delta: '资产目录' }),
+          h(Stat, {
+            value: String((catalog.available || []).filter(function (a) { return a.installed; }).length),
+            label: '已装在市场里的',
+            delta: '其余可安装',
+          }),
+          h(Stat, {
+            value: String(missing.length),
+            label: '依赖缺失',
+            delta: missing.length ? missing.map(function (m) { return m.package; }).join(', ') : '全部满足',
+          })
+        ),
+        h(
+          Card,
+          { title: '资产市场', sub: 'catalog 里可安装的资产包', extra: h(Badge, { tone: 'on' }, '真实目录'), flush: true },
+          h(Table, {
+            columns: [
+              { key: 'id', label: '资产包', render: function (r) { return h('span', { className: 'os-mono' }, r.id); } },
+              { key: 'name', label: '名称' },
+              { key: 'version', label: '版本', width: '9%' },
+              { key: 'objects', label: '对象', width: '8%' },
+              { key: 'rules', label: '规则', width: '8%' },
+              { key: 'actions', label: '动作', width: '8%' },
+              {
+                key: 'dependsOn',
+                label: '依赖',
+                render: function (r) {
+                  return r.dependsOn && r.dependsOn.length
+                    ? h('span', { className: 'os-mono os-muted' }, r.dependsOn.join(', '))
+                    : h('span', { className: 'os-muted' }, '—');
+                },
+              },
+              {
+                key: 'installed',
+                label: '状态',
+                width: '12%',
+                render: function (r) {
+                  return h(Badge, { tone: r.installed ? 'on' : '' }, r.installed ? '已安装' : r.ok ? '可安装' : '包不合法');
+                },
+              },
+            ],
+            rows: (catalog.available || []).map(function (a) { return Object.assign({ key: a.id }, a); }),
+          })
+        ),
+        h(
+          Card,
+          { title: '已安装', sub: '运行时真正读取的资产包', flush: true },
+          h(Table, {
+            columns: [
+              { key: 'id', label: '资产包', render: function (r) { return h('span', { className: 'os-mono' }, r.id); } },
+              { key: 'version', label: '版本', width: '12%' },
+              { key: 'objects', label: '对象', width: '10%' },
+            ],
+            rows: (catalog.installed || []).map(function (i) { return Object.assign({ key: i.id }, i); }),
+          })
+        ),
+        h(
+          Notes,
+          null,
+          '安装与卸载走 Agent 工具 ontology_install_asset / ontology_uninstall_asset（受写入门禁与审批闸门约束），面板只读展示——不提供绕过审批的按钮。'
+        )
+      );
+    }
+
+    function MarketplacePage(props) {
+      const model = (props && props.model) || buildModel({ phase: 'demo' });
+      if (model.live && model.catalog) return h(MarketplaceLivePage, { model: model });
       return h(
         'div',
         { className: 'os-grid' },

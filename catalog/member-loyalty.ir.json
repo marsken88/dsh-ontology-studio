@@ -1,0 +1,111 @@
+{
+  "irVersion": "0.1.0",
+  "id": "retail.member-loyalty",
+  "name": "会员权益资产包",
+  "description": "在门店-商品-库存之上叠加会员权益：券、活动、核销记录。用于验证跨资产包的依赖与安装顺序。",
+  "domain": "member",
+  "version": "0.2.0",
+  "owner": "会员中心",
+  "status": "published",
+  "dependsOn": ["retail.store-inventory"],
+  "objects": [
+    {
+      "id": "Coupon",
+      "name": "优惠券",
+      "description": "可核销的权益凭证，绑定面额与有效期。",
+      "keys": ["couponId"],
+      "properties": [
+        { "name": "couponId", "label": "券编号", "type": "string", "required": true },
+        { "name": "title", "label": "券名称", "type": "string", "required": true },
+        { "name": "faceValue", "label": "面额", "type": "money" },
+        { "name": "threshold", "label": "使用门槛", "type": "money" },
+        { "name": "validFrom", "label": "生效时间", "type": "datetime" },
+        { "name": "validTo", "label": "失效时间", "type": "datetime" }
+      ]
+    },
+    {
+      "id": "Campaign",
+      "name": "会员活动",
+      "description": "一段时间内的权益投放活动。",
+      "keys": ["campaignId"],
+      "properties": [
+        { "name": "campaignId", "label": "活动编号", "type": "string", "required": true },
+        { "name": "campaignName", "label": "活动名称", "type": "string", "required": true },
+        { "name": "channel", "label": "投放渠道", "type": "enum", "enum": ["门店", "小程序", "短信"] },
+        { "name": "startDate", "label": "开始日期", "type": "date" },
+        { "name": "endDate", "label": "结束日期", "type": "date" }
+      ]
+    },
+    {
+      "id": "Redemption",
+      "name": "核销记录",
+      "description": "券在门店被核销的事实记录。",
+      "keys": ["redemptionId"],
+      "properties": [
+        { "name": "redemptionId", "label": "核销编号", "type": "string", "required": true },
+        { "name": "couponId", "label": "券编号", "type": "string", "required": true },
+        { "name": "storeId", "label": "门店编号", "type": "string", "required": true },
+        { "name": "memberId", "label": "会员编号", "type": "string" },
+        { "name": "amount", "label": "抵扣金额", "type": "money" },
+        { "name": "redeemedAt", "label": "核销时间", "type": "datetime" }
+      ]
+    }
+  ],
+  "links": [
+    { "id": "redemption_redeems_coupon", "source": "Redemption", "target": "Coupon", "type": "redeems", "cardinality": "n:1" },
+    { "id": "campaign_grants_coupon", "source": "Campaign", "target": "Coupon", "type": "grants", "cardinality": "1:n" }
+  ],
+  "rules": [
+    {
+      "id": "coupon.expired",
+      "name": "券已过期仍在使用",
+      "expression": "validTo < now",
+      "severity": "error",
+      "enabled": true,
+      "owner": "会员中心"
+    },
+    {
+      "id": "redemption.belowThreshold",
+      "name": "核销金额低于门槛",
+      "expression": "amount < threshold",
+      "severity": "warn",
+      "enabled": true,
+      "owner": "会员中心"
+    }
+  ],
+  "actions": [
+    {
+      "id": "issueCoupon",
+      "name": "发券",
+      "input": "IssueCouponRequest",
+      "inputSchema": [
+        { "name": "couponId", "label": "券编号", "type": "string", "required": true },
+        { "name": "title", "label": "券名称", "type": "string", "required": true },
+        { "name": "faceValue", "label": "面额", "type": "number", "required": true }
+      ],
+      "approvalRequired": true,
+      "writes": ["Coupon"],
+      "effect": {
+        "object": "Coupon",
+        "matchKeys": ["couponId"],
+        "set": { "title": "title", "faceValue": "faceValue" }
+      }
+    },
+    {
+      "id": "redeemCoupon",
+      "name": "核销券",
+      "input": "RedeemCouponRequest",
+      "approvalRequired": false,
+      "writes": ["Redemption"]
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy.coupon.massIssue",
+      "name": "批量发券需审批",
+      "appliesTo": ["issueCoupon"],
+      "effect": "require-approval"
+    }
+  ],
+  "extensions": {}
+}

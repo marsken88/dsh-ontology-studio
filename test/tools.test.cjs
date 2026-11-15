@@ -87,9 +87,10 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects, sections } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册十六个工具', () => {
+  await it('apply 不抛错并注册十九个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
+      'ontology_asset_catalog',
       'ontology_delete_link',
       'ontology_delete_object',
       'ontology_diagnostics',
@@ -100,9 +101,11 @@ function fakeContext(options = {}) {
       'ontology_get',
       'ontology_history',
       'ontology_impact',
+      'ontology_install_asset',
       'ontology_list',
       'ontology_publish',
       'ontology_records',
+      'ontology_uninstall_asset',
       'ontology_upsert_link',
       'ontology_upsert_object',
       'ontology_validate',
@@ -115,10 +118,11 @@ function fakeContext(options = {}) {
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 
-  await it("writeMode: 'readonly' 时只注册十个读工具", () => {
+  await it("writeMode: 'readonly' 时只注册十一个读工具", () => {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, writeMode: 'readonly', trace: false });
     assert.deepEqual(alt.registered.map((d) => d.name).sort(), [
+      'ontology_asset_catalog',
       'ontology_diagnostics',
       'ontology_draft_object',
       'ontology_evaluate_rules',
@@ -147,13 +151,13 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 16, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 19, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 16);
+    assert.equal(alt.registered.length, 19);
   });
 
   await it('ontology_diagnostics 报出版本、配置与检查项', async () => {
@@ -182,7 +186,7 @@ function fakeContext(options = {}) {
     const writeCheck = value.checks.find((c) => c.name === '写入能力');
     assert.equal(writeCheck.status, 'warn');
     assert.ok(writeCheck.detail.includes('只读'));
-    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('10 个'));
+    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('11 个'));
   });
 
   await it('每个工具都有 parameters 与 output.schema/render', () => {

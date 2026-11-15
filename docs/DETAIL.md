@@ -20,6 +20,9 @@
 | `ontology_records` | 读 | 查看事实数据的行数与字段样例 |
 | `ontology_history` | 读 | 变更历史：谁在哪个版本改了什么 |
 | `ontology_export` | 读 | 导出 JSON Schema 或 Markdown 文档（只返回内容，不写文件） |
+| `ontology_asset_catalog` | 读 | 资产市场：可安装 / 已安装 / 依赖是否满足 |
+| `ontology_install_asset` | 写 | 从 catalog 安装一个包，缺依赖则拒绝 |
+| `ontology_uninstall_asset` | 写 | 卸载一个包，被依赖则拒绝 |
 | `ontology_upsert_object` | 写 | 新增或替换一个对象定义 |
 | `ontology_upsert_link` | 写 | 新增或替换一条对象关系 |
 | `ontology_delete_link` | 写 | 删除一条关系 |
@@ -38,6 +41,8 @@
 **反向建模**：给一张物理表的列名/类型/注释/主键，生成可直接入库的本体对象草稿——类型映射、命名归一、表名单数化、主键推断、外键列的关系建议，并在目标包副本上预校验。确定性归一，理解交给模型；草稿不写盘，确认后用 upsert 落库。
 
 **产物**：同一份 IR 能导出 JSON Schema（draft 2020-12，含 enum/日期格式/主键标记）与 Markdown 参考文档，供其它系统与文档站直接消费；只返回内容，不替你决定落盘位置。
+
+**资产市场**：catalog 目录里是可安装的包，assets 里是已安装的。安装缺依赖会拒绝，卸载被依赖会拒绝——两个方向都拦，不会出现半坏状态。面板的资产市场页只读展示，安装必须走工具以经过审批闸门。
 
 **留痕**：每次写入追加一条记录到 .ontology-history.jsonl（操作、对象、版本、内容摘要、etag），失败的写入不留痕。治理页读它渲染版本时间线。
 

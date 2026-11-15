@@ -19,6 +19,7 @@ import { validateInput, applyEffects, executableActions, policiesFor } from './l
 import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
+import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +36,9 @@ const lines = (items) => items.filter(Boolean).join('\n');
 export function apply(ctx, config = {}) {
   const assetsDir = config.assetsDir ? path.resolve(config.assetsDir) : path.join(here, 'assets');
   const store = createStore({ dir: assetsDir });
+
+  /** Catalog = packages available to install but not yet loaded. */
+  const catalogDir = config.catalogDir ? path.resolve(config.catalogDir) : path.join(here, 'catalog');
 
   /** `readonly` removes write tools entirely; `open` (default) keeps them. */
   const writeMode = config.writeMode === 'readonly' ? 'readonly' : 'open';
@@ -134,6 +138,7 @@ export function apply(ctx, config = {}) {
       trace,
       history,
       panel,
+      catalog: () => catalogState({ catalogDir, assetsDir: store.dir }),
       prefix: ROUTE_PREFIX,
       readOnly: writeMode === 'readonly',
       approval: approvalMode,
@@ -963,6 +968,135 @@ export function apply(ctx, config = {}) {
         return { ok: true, format, content: JSON.stringify(objectSchema(ir, object), null, 2) };
       }
       return { ok: true, format, content: JSON.stringify(packageSchemas(ir), null, 2) };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * Asset registry: catalog, install, uninstall
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_asset_catalog',
+    description:
+      '资产市场：列出可安装的资产包（catalog 目录）与已安装的资产包，标注依赖是否满足、是否已安装。回答「还有哪些包可以装」「这个包依赖谁」用它。',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          available: { type: 'array' },
+          installed: { type: 'array' },
+          missingDeps: { type: 'array' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        const lines = ['资产市场：'];
+        lines.push(`可安装（${(v.available || []).length}）：`);
+        for (const a of v.available || []) {
+          lines.push(
+            `  ${a.installed ? '✓ 已安装' : '· 可安装'} ${a.id} v${a.version} — ${a.objects} 对象 / ${a.rules} 规则 / ${a.actions} 动作${
+              a.dependsOn && a.dependsOn.length ? '；依赖 ' + a.dependsOn.join(', ') : ''
+            }`
+          );
+        }
+        lines.push(`已安装（${(v.installed || []).length}）：`);
+        for (const i of v.installed || []) lines.push(`  ${i.id} v${i.version}（${i.objects} 对象）`);
+        if ((v.missingDeps || []).length) {
+          lines.push('依赖缺失：');
+          for (const m of v.missingDeps) lines.push(`  ${m.package} 需要 ${m.missing}`);
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async () => {
+      const state = await catalogState({ catalogDir, assetsDir: store.dir });
+      const shape = (entry) => ({
+        id: entry.ir ? entry.ir.id : entry.file,
+        name: entry.ir ? entry.ir.name : entry.file,
+        version: entry.ir ? entry.ir.version : '—',
+        status: entry.ir ? entry.ir.status || 'draft' : 'invalid',
+        objects: entry.summary ? entry.summary.objects : 0,
+        rules: entry.summary ? entry.summary.rules : 0,
+        actions: entry.summary ? entry.summary.actions : 0,
+        dependsOn: entry.ir ? entry.ir.dependsOn || [] : [],
+        ok: entry.ok,
+        file: entry.file,
+      });
+      return {
+        ok: true,
+        available: state.available.map((entry) => Object.assign(shape(entry), { installed: entry.installed === true })),
+        installed: state.installed.map(shape),
+        missingDeps: state.missingDeps,
+      };
+    },
+  });
+
+  registerWrite({
+    name: 'ontology_install_asset',
+    description:
+      '从资产市场安装一个资产包：复制到资产目录。依赖未安装时拒绝，包不合法时拒绝，已安装则拒绝。',
+    parameters: {
+      type: 'object',
+      properties: { packageId: { type: 'string' } },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          version: { type: 'string' },
+          file: { type: 'string' },
+          missing: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok) return text(`已安装 ${v.packageId} v${v.version} → ${v.file}`);
+        return text(`未安装：${v.message || '未知原因'}`);
+      },
+    },
+    execute: async (args) => {
+      const result = await installAsset({ catalogDir, assetsDir: store.dir }, args.packageId);
+      if (result.ok) await refreshBrief();
+      return result;
+    },
+  });
+
+  registerWrite({
+    name: 'ontology_uninstall_asset',
+    description: '卸载一个已安装的资产包：从资产目录删除。若其它已安装的包依赖它则拒绝。',
+    parameters: {
+      type: 'object',
+      properties: { packageId: { type: 'string' } },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          requiredBy: { type: 'array' },
+          file: { type: 'string' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok) return text(`已卸载 ${v.packageId}`);
+        return text(`未卸载：${v.message || '未知原因'}`);
+      },
+    },
+    execute: async (args) => {
+      const result = await uninstallAsset({ catalogDir, assetsDir: store.dir }, args.packageId);
+      if (result.ok) await refreshBrief();
+      return result;
     },
   });
 

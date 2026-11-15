@@ -119,6 +119,13 @@ React.__setLive({
   file: '<assets>/store-inventory.ir.json',
   ir,
   error: null,
+  catalog: {
+    available: [
+      { id: 'retail.member-loyalty', name: '会员权益资产包', version: '0.2.0', objects: 3, rules: 2, actions: 2, dependsOn: ['retail.store-inventory'], installed: false, ok: true },
+    ],
+    installed: [{ id: ir.id, version: ir.version, objects: 6 }],
+    missingDeps: [],
+  },
   history: [
     { ts: 1700000002000, packageId: ir.id, version: '1.1.0', op: 'upsert_object', target: 'Warehouse', summary: '新增对象 Warehouse' },
     { ts: 1700000001000, packageId: ir.id, version: '1.0.0', op: 'publish', target: ir.id, summary: '发布 1.0.0 → 1.1.0' },
@@ -146,6 +153,7 @@ const expectations = {
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明'],
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行'],
   governance: ['变更历史', 'upsert_object', 'v1.1.0'],
+  marketplace: ['资产市场', '会员权益资产包', '可安装'],
 };
 for (const p of Object.keys(expectations)) {
   React.__setPage(p === 'overview' ? null : p);
