@@ -227,6 +227,54 @@ function post(handler, url, body, headers = {}) {
     assert.equal(r.code, 404);
   });
 
+  console.log('\n关系');
+
+  await it('新增关系并落盘', async () => {
+    const dir = tempDir();
+    const store = createStore({ dir });
+    const { handler } = boot({ store });
+    const r = await post(handler, '/dsh-ontology-studio/write/save-link', {
+      packageId: 'retail.store-inventory',
+      link: { id: 'warehouse_references_store', source: 'Warehouse', target: 'Store', type: 'references', cardinality: 'n:1' },
+    });
+    assert.equal(r.code, 422, 'Warehouse 不存在，应当被校验拦下');
+    assert.ok(r.body.problems.some((p) => p.code === 'dangling-endpoint'));
+  });
+
+  await it('端点在的对象上建关系成功', async () => {
+    const dir = tempDir();
+    const store = createStore({ dir });
+    const { handler, history } = boot({ store });
+    const r = await post(handler, '/dsh-ontology-studio/write/save-link', {
+      packageId: 'retail.store-inventory',
+      link: { id: 'inventory_replenished_from_supplier', source: 'Inventory', target: 'Supplier', type: 'replenishedFrom', cardinality: 'n:1' },
+    });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    assert.equal(r.body.action, 'created');
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'));
+    assert.ok((onDisk.links || []).some((l) => l.id === 'inventory_replenished_from_supplier'));
+    assert.equal(history[0].op, 'upsert_link');
+  });
+
+  await it('删除关系', async () => {
+    const dir = tempDir();
+    const store = createStore({ dir });
+    const { handler } = boot({ store });
+    const current = JSON.parse(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'));
+    const victim = current.links[0].id;
+    const r = await post(handler, '/dsh-ontology-studio/write/delete-link', { packageId: 'retail.store-inventory', linkId: victim });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'));
+    assert.ok(!(onDisk.links || []).some((l) => l.id === victim));
+  });
+
+  await it('删不存在的关系 404', async () => {
+    const store = createStore({ dir: tempDir() });
+    const { handler } = boot({ store });
+    const r = await post(handler, '/dsh-ontology-studio/write/delete-link', { packageId: 'retail.store-inventory', linkId: 'nope' });
+    assert.equal(r.code, 404);
+  });
+
   console.log('\n模式与协议');
 
   await it('只读模式一律 403，且磁盘不变', async () => {

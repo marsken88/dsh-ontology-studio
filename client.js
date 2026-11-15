@@ -1064,6 +1064,33 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /** Relations touching one object, straight from the IR so ids survive. */
+    function rawLinks(model, objectId) {
+      const pkg = model && model.pkg;
+      if (!pkg || !Array.isArray(pkg.links)) return [];
+      return pkg.links
+        .filter(function (l) {
+          return l.source === objectId || l.target === objectId;
+        })
+        .map(function (l) {
+          const outgoing = l.source === objectId;
+          const otherId = outgoing ? l.target : l.source;
+          const other = (pkg.objects || []).filter(function (o) {
+            return o.id === otherId;
+          })[0];
+          return {
+            key: l.id,
+            id: l.id,
+            type: l.type,
+            direction: outgoing ? '出向' : '入向',
+            cardinality: l.cardinality || '—',
+            other: other ? other.id + '（' + other.name + '）' : otherId,
+            source: l.source,
+            target: l.target,
+          };
+        });
+    }
+
     /** The IR object, not the view model: the editor must save what the file holds. */
     function rawObject(model, id) {
       const pkg = model && model.pkg;
@@ -1352,6 +1379,209 @@ window.__ModuleLoader__.load({
       );
     }
 
+
+    var CARDINALITIES = ['n:1', '1:n', '1:1', 'n:n'];
+
+    /** snake_case id from "<source>_<type>_<target>" so relations stay predictable. */
+    function linkIdFor(source, type, target) {
+      const toSnake = function (name) {
+        return String(name || '')
+          .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+          .replace(/[\s\-.]+/g, '_')
+          .toLowerCase();
+      };
+      return toSnake(source) + '_' + toSnake(type || 'references') + '_' + toSnake(target);
+    }
+
+    /** Inline editor for one relation, saved through the panel write route. */
+    function LinkEditor(props) {
+      const objects = props.objects || [];
+      const initial = props.initial;
+      const [draft, setDraft] = useState(
+        initial
+          ? JSON.parse(JSON.stringify(initial))
+          : { id: '', source: props.sourceObjectId, target: '', type: 'references', cardinality: 'n:1' }
+      );
+      const [busy, setBusy] = useState(false);
+      const [problems, setProblems] = useState([]);
+      const isNew = !initial;
+
+      const patch = function (field, value) {
+        const next = JSON.parse(JSON.stringify(draft));
+        next[field] = value;
+        // Keep the id in step with the ends and the verb until it is hand-edited.
+        if (isNew && (field === 'target' || field === 'type')) {
+          next.id = linkIdFor(next.source, next.type, next.target);
+        }
+        setDraft(next);
+      };
+
+      const save = function () {
+        if (busy) return;
+        setBusy(true);
+        setProblems([]);
+        post('/write/save-link', { packageId: props.packageId, link: draft })
+          .then(function (body) {
+            if (body && body.ok) {
+              props.onDone();
+              return;
+            }
+            setProblems((body && body.problems) || [{ message: (body && (body.message || body.error)) || '保存失败' }]);
+          })
+          .catch(function (error) {
+            setProblems([{ message: String(error && error.message) }]);
+          })
+          .then(function () {
+            setBusy(false);
+          });
+      };
+
+      const remove = function () {
+        if (busy || isNew) return;
+        setBusy(true);
+        setProblems([]);
+        post('/write/delete-link', { packageId: props.packageId, linkId: draft.id })
+          .then(function (body) {
+            if (body && body.ok) {
+              props.onDone();
+              return;
+            }
+            setProblems((body && body.problems) || [{ message: (body && (body.message || body.error)) || '删除失败' }]);
+          })
+          .catch(function (error) {
+            setProblems([{ message: String(error && error.message) }]);
+          })
+          .then(function () {
+            setBusy(false);
+          });
+      };
+
+      const options = objects.map(function (o) {
+        return h('option', { key: o.id, value: o.id }, o.id + '（' + o.name + '）');
+      });
+
+      return h(
+        Card,
+        {
+          title: isNew ? '新增关系' : '编辑关系 ' + draft.id,
+          sub: '两端对象必须已存在；保存前按整包校验',
+          extra: h(
+            'button',
+            { type: 'button', className: 'os-btn', onClick: function () { props.onCancel(); } },
+            '取消'
+          ),
+        },
+        h(
+          'div',
+          { className: 'os-grid os-g3' },
+          h(
+            'label',
+            { className: 'os-field' },
+            h('span', { className: 'os-field-l' }, '起点对象'),
+            h(
+              'select',
+              {
+                className: 'os-input',
+                value: draft.source,
+                onChange: function (event) {
+                  patch('source', event.target.value);
+                },
+              },
+              options
+            )
+          ),
+          h(
+            'label',
+            { className: 'os-field' },
+            h('span', { className: 'os-field-l' }, '关系动词'),
+            h('input', {
+              className: 'os-input',
+              value: draft.type,
+              placeholder: 'references / belongsTo / replenishedFrom',
+              onChange: function (event) {
+                patch('type', event.target.value);
+              },
+            })
+          ),
+          h(
+            'label',
+            { className: 'os-field' },
+            h('span', { className: 'os-field-l' }, '目标对象'),
+            h(
+              'select',
+              {
+                className: 'os-input',
+                value: draft.target,
+                onChange: function (event) {
+                  patch('target', event.target.value);
+                },
+              },
+              [h('option', { key: '', value: '' }, '（选择对象）')].concat(options)
+            )
+          )
+        ),
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          h(
+            'label',
+            { className: 'os-field' },
+            h('span', { className: 'os-field-l' }, '基数'),
+            h(
+              'select',
+              {
+                className: 'os-input',
+                value: draft.cardinality || 'n:1',
+                onChange: function (event) {
+                  patch('cardinality', event.target.value);
+                },
+              },
+              CARDINALITIES.map(function (c) {
+                return h('option', { key: c, value: c }, c);
+              })
+            )
+          ),
+          h(
+            'label',
+            { className: 'os-field' },
+            h('span', { className: 'os-field-l' }, '关系 ID'),
+            h('input', {
+              className: 'os-input',
+              value: draft.id,
+              placeholder: 'inventory_references_supplier',
+              onChange: function (event) {
+                const next = JSON.parse(JSON.stringify(draft));
+                next.id = event.target.value;
+                setDraft(next);
+              },
+            })
+          )
+        ),
+        problems.length
+          ? h(
+              'div',
+              { className: 'os-card-b', style: { marginTop: 10 } },
+              problems.map(function (pr, i) {
+                return h(
+                  'div',
+                  { key: i, className: 'os-row' },
+                  h(Badge, { tone: 'err' }, pr.code || '错误'),
+                  h('span', { className: 'os-grow' }, (pr.path ? pr.path + ' — ' : '') + (pr.message || ''))
+                );
+              })
+            )
+          : null,
+        h(
+          'div',
+          { style: { marginTop: 14, display: 'flex', gap: 8, alignItems: 'center' } },
+          h('button', { type: 'button', className: 'os-btn pri', onClick: save, disabled: busy }, busy ? '保存中…' : '保存'),
+          isNew ? null : h('button', { type: 'button', className: 'os-btn', onClick: remove, disabled: busy }, '删除关系'),
+          h('span', { className: 'os-grow' }),
+          h('span', { className: 'os-muted' }, '关系删掉不波及对象与动作')
+        )
+      );
+    }
+
     function OntologyPage(props) {
       const model = props.model || buildModel({ phase: 'demo' });
       const objects = model.objects && model.objects.length ? model.objects : OBJECTS;
@@ -1437,7 +1667,23 @@ window.__ModuleLoader__.load({
             )
           )
         ),
-        editing && packageId
+        editing && packageId && String(editing).indexOf('__link__') === 0
+          ? h(LinkEditor, {
+              packageId: packageId,
+              sourceObjectId: obj.id,
+              objects: (model.pkg && model.pkg.objects) || [],
+              initial:
+                String(editing) === '__link__'
+                  ? null
+                  : rawLinks(model, obj.id).filter(function (l) {
+                      return l.id === String(editing).slice('__link__:'.length);
+                    })[0],
+              onDone: reloadAfterWrite,
+              onCancel: function () {
+                setEditing(null);
+              },
+            })
+          : editing && packageId
           ? h(ObjectEditor, {
               packageId: packageId,
               initial: editing === 'new' ? null : rawObject(model, editing),
@@ -1478,16 +1724,66 @@ window.__ModuleLoader__.load({
             { className: 'os-grid os-g2' },
             h(
               Card,
-              { title: '关系', flush: true },
-              h(Table, {
-                columns: [
-                  { key: '0', label: '类型', render: (r) => h(Badge, { tone: 'brand' }, r[0]) },
-                  { key: '1', label: '目标对象' },
-                  { key: '2', label: '基数' },
-                  { key: '3', label: '说明' },
-                ],
-                rows: obj.links.map((l) => ({ key: l[0] + l[1], 0: l[0], 1: l[1], 2: l[2], 3: l[3] || '—' })),
-              })
+              {
+                title: '关系',
+                sub: packageId && model.pkg ? (model.pkg.links || []).length + ' 条声明' : '演示数据',
+                extra:
+                  packageId && model.pkg
+                    ? h(
+                        'button',
+                        { type: 'button', className: 'os-btn', onClick: function () { setEditing('__link__'); } },
+                        '+ 新增关系'
+                      )
+                    : null,
+                flush: true,
+              },
+              rawLinks(model, obj.id).length
+                ? h(Table, {
+                    columns: [
+                      { key: 'type', label: '类型', render: (r) => h(Badge, { tone: 'brand' }, r.type) },
+                      { key: 'other', label: '另一端对象' },
+                      { key: 'direction', label: '方向', width: '10%' },
+                      { key: 'cardinality', label: '基数', width: '10%' },
+                      {
+                        key: 'ops',
+                        label: '',
+                        width: '18%',
+                        render: (r) =>
+                          packageId && model.pkg
+                            ? h(
+                                'div',
+                                { style: { display: 'flex', gap: 6 } },
+                                h(
+                                  'button',
+                                  {
+                                    type: 'button',
+                                    className: 'os-btn',
+                                    onClick: function () {
+                                      setEditing('__link__:' + r.id);
+                                    },
+                                  },
+                                  '编辑'
+                                ),
+                                h(
+                                  'button',
+                                  {
+                                    type: 'button',
+                                    className: 'os-btn',
+                                    onClick: function () {
+                                      post('/write/delete-link', { packageId: packageId, linkId: r.id }).then(function () {
+                                        if (typeof props.onSaved === 'function') props.onSaved();
+                                      });
+                                    },
+                                  },
+                                  '删除'
+                                )
+                              )
+                            : null,
+                      },
+                    ],
+                    rows: rawLinks(model, obj.id),
+                  })
+                : h('div', { className: 'os-card-b os-muted' }, '这个对象还没有关系——新建关系才能和别的对象连起来。')
             ),
             h(
               Card,
