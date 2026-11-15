@@ -239,6 +239,7 @@ README 只回答「这是什么、怎么装、怎么用、边界在哪」。想�
 | [建模辅助：反向建模、应用生成与产物导出](docs/modeling.md) | 反向建模：表结构 → 本体草稿、一份 IR，两种产物、应用构建：从元数据生成页面规格 |
 | [Agent 与资产流转](docs/agents-and-market.md) | Context Engine：进对话就懂这个本体、本体上下文 · 门店-商品-库存、Agent 花名册：声明 + 证据、资产市场：安装、卸载、依赖 |
 | [测试](docs/testing.md) | 测试 |
+| [从 Harness² 借了什么](docs/harness2-notes.md) | 组件分类与「同条件才可比」的纪律，以及明确不做的三件事 |
 
 ## 已知边界
 
