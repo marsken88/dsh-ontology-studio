@@ -187,10 +187,27 @@ function fakeContext(options = {}) {
     assert.equal(value.config.writeMode, 'open');
     assert.equal(value.config.context, 'brief');
     const names = value.checks.map((c) => c.name);
-    for (const expected of ['资产目录', '资产包', '写入能力', '上下文简报', '工具注册', '执行轨迹']) {
+    for (const expected of ['版本一致', '资产目录', '资产包', '写入能力', '上下文简报', '工具注册', '执行轨迹', '面板渲染', '资产市场']) {
       assert.ok(names.includes(expected), '缺少检查项：' + expected);
     }
     assert.ok(value.checks.every((c) => ['ok', 'warn', 'fail'].includes(c.status)));
+  });
+
+  await it('面板上报过页面错误时自检判失败', async () => {
+    const alt = fakeContext();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ontology-diag-'));
+    fs.copyFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), path.join(dir, 'store-inventory.ir.json'));
+    fs.writeFileSync(
+      path.join(dir, 'panel.jsonl'),
+      JSON.stringify({ phase: 'page-error', page: 'data', error: 'boom', receivedAt: 1 }) + '\n'
+    );
+    mod.apply(alt.ctx, { assetsDir: dir, trace: false, panelFile: path.join(dir, 'panel.jsonl') });
+    const tool = alt.registered.find((d) => d.name === 'ontology_diagnostics');
+    const value = await tool.execute({}, {});
+    const check = value.checks.find((c) => c.name === '面板渲染');
+    assert.equal(check.status, 'fail');
+    assert.ok(check.detail.includes('data'), '应点名出错的页面');
+    assert.equal(value.ok, false, '有页面错误时整体判失败');
   });
 
   await it('readonly 模式下自检如实报告只读', async () => {

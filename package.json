@@ -1,6 +1,6 @@
 {
   "name": "dsh-ontology-studio",
-  "version": "0.23.0",
+  "version": "0.23.1",
   "private": true,
   "type": "module",
   "description": "Ontology Studio — enterprise semantic modeling and Harness execution platform shell inside the DeepSeek Harness Web GUI (8 studios, unified navigation, demo data).",

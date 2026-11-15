@@ -26,7 +26,7 @@ import { diffPackages, describeDiff } from './lib/diff.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.23.0';
+const CODE_VERSION = '0.23.1';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -835,6 +835,37 @@ export function apply(ctx, config = {}) {
         }
       } else {
         add('执行轨迹', 'warn', 'trace: false，已关闭');
+      }
+
+      // The panel reports its own render health; a page that throws shows up here
+      // instead of only in someone's screenshot.
+      if (panel.enabled) {
+        try {
+          const reports = await panel.list(50);
+          const pageErrors = reports.filter((r) => r && r.phase === 'page-error');
+          if (pageErrors.length) {
+            const latest = pageErrors[0];
+            add('面板渲染', 'fail', `${pageErrors.length} 次页面错误，最近：${latest.page || '?'} — ${latest.error || '未知'}`);
+          } else {
+            add('面板渲染', 'ok', reports.length ? `最近 ${reports.length} 次上报无错误` : '暂无上报（面板未打开过）');
+          }
+        } catch (error) {
+          add('面板渲染', 'warn', `读取上报失败：${error.message}`);
+        }
+      } else {
+        add('面板渲染', 'warn', 'panel: false，已关闭');
+      }
+
+      try {
+        const state = await catalogState({ catalogDir, assetsDir: store.dir });
+        const upgradable = state.available.filter((e) => e.upgradable).length;
+        add(
+          '资产市场',
+          state.missingDeps.length ? 'warn' : 'ok',
+          `可安装 ${state.available.length - state.installedIds.size} / 可升级 ${upgradable} / 依赖缺失 ${state.missingDeps.length}`
+        );
+      } catch (error) {
+        add('资产市场', 'warn', `读取失败：${error.message}`);
       }
 
       const failing = checks.filter((c) => c.status === 'fail');
