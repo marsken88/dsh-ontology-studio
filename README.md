@@ -266,7 +266,10 @@ README 只回答「这是什么、怎么装、怎么用、边界在哪」。想�
 
 ## 许可
 
-[MIT](LICENSE)。
+[Apache License 2.0](LICENSE)（附 [NOTICE](NOTICE)）。
+
+选它的原因：明确授予专利许可，并且要求保留声明与变更说明——
+企业内二次分发时比 MIT 更清楚边界。使用时请保留 `LICENSE` 与 `NOTICE`。
 
 ---
 
