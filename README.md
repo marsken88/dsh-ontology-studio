@@ -5,7 +5,7 @@
 [![test](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml/badge.svg)](https://github.com/marsken88/dsh-ontology-studio/actions/workflows/test.yml)
 [![version](https://img.shields.io/github/package-json/v/marsken88/dsh-ontology-studio)](https://github.com/marsken88/dsh-ontology-studio)
 ![node](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)
-[![license](https://img.shields.io/github/license/marsken88/dsh-ontology-studio)](LICENSE)
+[![license](https://img.shields.io/github/license/marsken88/dsh-ontology-studio?cacheSeconds=300)](LICENSE)
 
 企业级 Ontology + Harness 平台的落地工程。目标不是做一个「本体建模页面」，而是：
 
