@@ -1582,12 +1582,268 @@ window.__ModuleLoader__.load({
       );
     }
 
+
+    /* ------------------------------------------------------------------ *
+     * Graph view: drag nodes to arrange, drag from a node's edge to another
+     * to create a relation. Positions are a view concern, so they live in
+     * localStorage, not in the IR.
+     * ------------------------------------------------------------------ */
+    var NODE_W = 168;
+    var NODE_H = 62;
+
+    function layoutOf(ids, size) {
+      // Deterministic ring layout: same package always starts from the same picture.
+      const radius = Math.max(180, Math.min(size.width, size.height) / 2 - 120);
+      const cx = size.width / 2;
+      const cy = size.height / 2;
+      const out = {};
+      ids.forEach(function (id, i) {
+        const angle = (Math.PI * 2 * i) / Math.max(1, ids.length) - Math.PI / 2;
+        out[id] = {
+          x: Math.round(cx + radius * Math.cos(angle) - NODE_W / 2),
+          y: Math.round(cy + radius * Math.sin(angle) - NODE_H / 2),
+        };
+      });
+      return out;
+    }
+
+    function GraphView(props) {
+      const pkg = props.pkg;
+      const objects = (pkg && pkg.objects) || [];
+      const links = (pkg && pkg.links) || [];
+      const size = { width: 1000, height: 560 };
+      const storeKey = 'os:graph:' + (pkg ? pkg.id : 'demo');
+
+      const [positions, setPositions] = useState(function () {
+        const base = layoutOf(objects.map(function (o) { return o.id; }), size);
+        try {
+          const saved = JSON.parse(localStorage.getItem(storeKey) || 'null');
+          if (saved && typeof saved === 'object') {
+            for (const id of Object.keys(saved)) if (base[id]) base[id] = saved[id];
+          }
+        } catch (error) {
+          /* a broken saved layout must not block the view */
+        }
+        return base;
+      });
+      // { kind: 'node'|'link', id, dx, dy, x, y }
+      const [drag, setDrag] = useState(null);
+      const [over, setOver] = useState(null);
+      const [notice, setNotice] = useState('');
+      const svgRef = React.useRef(null);
+
+      const persist = function (next) {
+        try {
+          localStorage.setItem(storeKey, JSON.stringify(next));
+        } catch (error) {
+          /* private mode: layout just will not survive a reload */
+        }
+      };
+
+      const pointOf = function (event) {
+        const svg = svgRef.current;
+        if (!svg || typeof svg.getBoundingClientRect !== 'function') return { x: 0, y: 0 };
+        const rect = svg.getBoundingClientRect();
+        const scale = rect.width ? size.width / rect.width : 1;
+        return { x: (event.clientX - rect.left) * scale, y: (event.clientY - rect.top) * scale };
+      };
+
+      const startNodeDrag = function (event, id) {
+        const point = pointOf(event);
+        const pos = positions[id];
+        if (!pos) return;
+        setDrag({ kind: 'node', id: id, dx: point.x - pos.x, dy: point.y - pos.y });
+        event.preventDefault();
+      };
+
+      const startLinkDrag = function (event, id) {
+        const point = pointOf(event);
+        setDrag({ kind: 'link', id: id, x: point.x, y: point.y });
+        event.preventDefault();
+        event.stopPropagation();
+      };
+
+      const onMove = function (event) {
+        if (!drag) return;
+        const point = pointOf(event);
+        if (drag.kind === 'node') {
+          const next = Object.assign({}, positions, {
+            [drag.id]: { x: Math.round(point.x - drag.dx), y: Math.round(point.y - drag.dy) },
+          });
+          setPositions(next);
+        } else {
+          setDrag(Object.assign({}, drag, { x: point.x, y: point.y }));
+        }
+      };
+
+      const onUp = function () {
+        if (!drag) return;
+        if (drag.kind === 'node') {
+          persist(positions);
+          setDrag(null);
+          return;
+        }
+        const target = over;
+        setDrag(null);
+        setOver(null);
+        if (!target || target === drag.id) return;
+        // Create the relation with a predictable id, then let the caller refresh.
+        const link = {
+          id: linkIdFor(drag.id, 'references', target),
+          source: drag.id,
+          target: target,
+          type: 'references',
+          cardinality: 'n:1',
+        };
+        setNotice('正在创建关系 ' + link.id + ' …');
+        post('/write/save-link', { packageId: pkg.id, link: link })
+          .then(function (body) {
+            if (body && body.ok) {
+              setNotice('已创建关系 ' + link.id);
+              if (typeof props.onSaved === 'function') props.onSaved();
+              return;
+            }
+            const first = (body && (body.problems || [])[0]) || {};
+            setNotice('未创建：' + (first.message || (body && body.error) || '未知原因'));
+          })
+          .catch(function (error) {
+            setNotice('未创建：' + String(error && error.message));
+          });
+      };
+
+      const edges = links
+        .filter(function (l) {
+          return positions[l.source] && positions[l.target];
+        })
+        .map(function (l, i) {
+          const from = positions[l.source];
+          const to = positions[l.target];
+          const x1 = from.x + NODE_W / 2;
+          const y1 = from.y + NODE_H / 2;
+          const x2 = to.x + NODE_W / 2;
+          const y2 = to.y + NODE_H / 2;
+          return { key: l.id || i, id: l.id, type: l.type, x1: x1, y1: y1, x2: x2, y2: y2, mx: (x1 + x2) / 2, my: (y1 + y2) / 2 };
+        });
+
+      return h(
+        Card,
+        {
+          title: '图谱',
+          sub: objects.length + ' 个对象 · ' + links.length + ' 条关系 — 拖动节点排版，从节点右侧圆点拖到另一个节点建关系',
+          extra: h(
+            'div',
+            { style: { display: 'flex', gap: 6 } },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'os-btn',
+                onClick: function () {
+                  const reset = layoutOf(objects.map(function (o) { return o.id; }), size);
+                  setPositions(reset);
+                  persist(reset);
+                  setNotice('已恢复自动布局');
+                },
+              },
+              '重排'
+            )
+          ),
+          flush: true,
+        },
+        h(
+          'div',
+          { className: 'os-graph', style: { overflow: 'auto', maxHeight: '70vh', background: 'transparent', userSelect: 'none', WebkitUserSelect: 'none' } },
+          h(
+            'svg',
+            {
+              ref: svgRef,
+              viewBox: '0 0 ' + size.width + ' ' + size.height,
+              style: {
+                width: size.width + 'px',
+                height: size.height + 'px',
+                display: 'block',
+                userSelect: 'none',
+                cursor: drag ? 'grabbing' : 'default',
+              },
+              onMouseMove: onMove,
+              onMouseUp: onUp,
+              onMouseLeave: onUp,
+            },
+            h('defs', null,
+              h('marker', { id: 'os-arrow', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' },
+                h('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: 'var(--dsw-alias-border-l1, #8a8a8a)' })
+              )
+            ),
+            edges.map(function (e) {
+              return h('g', { key: e.key },
+                h('line', {
+                  x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2,
+                  stroke: 'var(--dsw-alias-border-l1, #8a8a8a)',
+                  strokeWidth: '1.5',
+                  markerEnd: 'url(#os-arrow)',
+                }),
+                h('text', {
+                  x: e.mx, y: e.my - 4,
+                  fontSize: '11', textAnchor: 'middle',
+                  fill: 'var(--dsw-alias-label-tertiary, #888)',
+                }, e.type)
+              );
+            }),
+            drag && drag.kind === 'link' && positions[drag.id]
+              ? h('line', {
+                  x1: positions[drag.id].x + NODE_W,
+                  y1: positions[drag.id].y + NODE_H / 2,
+                  x2: drag.x,
+                  y2: drag.y,
+                  stroke: 'var(--dsw-alias-brand-primary, #4c8dff)',
+                  strokeWidth: '2',
+                  strokeDasharray: '4 3',
+                })
+              : null,
+            objects.map(function (o) {
+              const pos = positions[o.id] || { x: 0, y: 0 };
+              const active = over === o.id;
+              return h('g', { key: o.id, transform: 'translate(' + pos.x + ',' + pos.y + ')' },
+                h('rect', {
+                  width: NODE_W,
+                  height: NODE_H,
+                  rx: 10,
+                  fill: 'var(--dsw-alias-bg-l1, #fff)',
+                  stroke: active ? 'var(--dsw-alias-brand-primary, #4c8dff)' : 'var(--dsw-alias-border-l1, #d0d0d0)',
+                  strokeWidth: active ? 2 : 1,
+                  style: { cursor: 'grab' },
+                  onMouseDown: function (event) { startNodeDrag(event, o.id); },
+                  onMouseEnter: function () { if (drag && drag.kind === 'link') setOver(o.id); },
+                  onMouseLeave: function () { if (over === o.id) setOver(null); },
+                  onClick: function () { if (props.onPick) props.onPick(o.id); },
+                }),
+                h('text', { x: 12, y: 24, fontSize: '13', fontWeight: 600, fill: 'var(--dsw-alias-label-primary, #222)', style: { pointerEvents: 'none' } }, o.name || o.id),
+                h('text', { x: 12, y: 44, fontSize: '11', fill: 'var(--dsw-alias-label-tertiary, #888)', style: { pointerEvents: 'none' } },
+                  o.id + ' · ' + ((o.properties || []).length) + ' 属性'),
+                h('circle', {
+                  cx: NODE_W,
+                  cy: NODE_H / 2,
+                  r: 6,
+                  fill: 'var(--dsw-alias-brand-primary, #4c8dff)',
+                  style: { cursor: 'crosshair' },
+                  onMouseDown: function (event) { startLinkDrag(event, o.id); },
+                })
+              );
+            })
+          )
+        ),
+        notice ? h('div', { className: 'os-card-b os-muted' }, notice) : null,
+        h(Notes, null, '拖动节点只改布局，不改本体；布局存在浏览器本地。建关系会真的写入资产——保存前按整包校验，失败会把校验问题贴在下面。')
+      );
+    }
+
     function OntologyPage(props) {
       const model = props.model || buildModel({ phase: 'demo' });
       const objects = model.objects && model.objects.length ? model.objects : OBJECTS;
       const [sel, setSel] = useState('Inventory');
       const [view, setView] = useState(VIEWS[0]);
       const [editing, setEditing] = useState(null);
+      const [view2, setView2] = useState('list');
       const packageId = model && model.pkg ? model.pkg.id : null;
       const reloadAfterWrite = function () {
         setEditing(null);
@@ -1614,6 +1870,23 @@ window.__ModuleLoader__.load({
       });
 
       const c3 = { 业务视角: '说明', 数据视角: '主键', 技术视角: '存储位置', 'AI 视角': '语义约束' }[view];
+
+      // 图谱是纯视图：拖动改布局，连线真的写资产。
+      if (view2 === 'graph' && packageId && model.pkg) {
+        return h(GraphView, {
+          pkg: model.pkg,
+          onSaved: function () {
+            if (typeof props.onSaved === 'function') props.onSaved();
+          },
+          onPick: function (id) {
+            setSel(id);
+            setView2('list');
+          },
+          onBack: function () {
+            setView2('list');
+          },
+        });
+      }
       const c4 = { 业务视角: '必填', 数据视角: '来源字段', 技术视角: '索引', 'AI 视角': 'Agent 权限' }[view];
 
       return h(
@@ -1626,9 +1899,22 @@ window.__ModuleLoader__.load({
             sub: objects.length + ' 个',
             extra: packageId
               ? h(
-                  'button',
-                  { type: 'button', className: 'os-btn', onClick: function () { setEditing('new'); } },
-                  '+ 新建对象'
+                  'div',
+                  { style: { display: 'flex', gap: 6 } },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'os-btn',
+                      onClick: function () { setView2('graph'); },
+                    },
+                    '图谱视图'
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'os-btn', onClick: function () { setEditing('new'); } },
+                    '+ 新建对象'
+                  )
                 )
               : null,
             flush: true,

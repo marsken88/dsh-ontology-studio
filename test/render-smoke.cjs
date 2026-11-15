@@ -173,7 +173,7 @@ React.__setLive({
 });
 const expectations = {
   overview: ['实时资产', ir.id, '刷新', '需要审批的动作'],
-  ontology: ['Inventory', 'availableQty', 'belongsTo', '+ 新增关系', '+ 新建对象'],
+  ontology: ['Inventory', 'availableQty', 'belongsTo', '+ 新增关系', '+ 新建对象', '图谱视图'],
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明', '在示例数据上跑一次', '+ 新增规则'],
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行'],
