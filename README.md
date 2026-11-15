@@ -18,7 +18,7 @@
 | 统一本体 IR + 正式 JSON Schema | ✅ `assets/ontology-ir.schema.json` |
 | IR 校验器（结构 + 跨引用 + 未知字段 + 影响分析） | ✅ `lib/ir.mjs` 与 JSON Schema 严格度一致 |
 | 只读资产仓库（目录即数据源） | ✅ `lib/store.mjs` |
-| 模型编辑：对象、关系的增改删 | ✅ 五个写工具，校验门禁 + 级联策略 |
+| 模型编辑 | ✅ 九个写工具（对象/关系/规则/发布/删除/动作/市场），校验门禁 + 级联策略 |
 | 版本递增与发布状态机 | ✅ `ontology_publish` |
 | 面板 ↔ 宿主联通 | ✅ 面板读真实资产，断线自动回落到演示数据（升级后需强刷） |
 | 能力门禁（只读模式） | ✅ `writeMode: readonly` 直接不注册写工具 |
@@ -37,6 +37,8 @@
 | 版本对比 | ✅ 任意两个包按条目对比：新增/删除/变更逐条列出 |
 | 应用构建 | ✅ 从对象元数据生成页面规格：列/筛选器/操作表单 |
 | Agent 花名册 | ✅ 声明在本体包里，调用数据来自执行轨迹（声明与证据分开） |
+| 本体体检 | ✅ 六方面（结构/规则/动作/护栏/数据/Agent）逐项检查，缺口带「怎么补」 |
+| 规则评测 | ✅ 记录条件指纹；规则与数据同时变化时拒绝比较 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -49,6 +51,75 @@
 | 边界 | 适合平台控制平面与交互 | 数据平面、图存储仍需独立服务 |
 
 结论：**界面与 Agent 能力做插件，重数据能力（图存储、同步、联邦查询）做独立服务**，二者用标准 API 对接。
+
+## 安装
+
+前置：**DSH 0.2.x**（Desktop 应用或 `dsh web`）。本仓库是一个 DSH 插件包：
+`package.json` 声明 `dsh.bundle.patch` 与 `dsh.client`，`cordis.patch.yml` 把插件行插进 profile 花名册。
+
+**本地开发安装**（已在 Windows 与 Linux 主机上验证）：
+
+```bash
+# profile 不存在时先按默认模板建一个
+dsh --profile <profile名> --from-default-profile web
+
+# 以 link 方式装入本仓库
+dsh plugin --profile <profile名> add link:<本仓库路径>
+
+# 起宿主
+dsh --profile <profile名> web
+```
+
+装好后左侧栏会出现 **Ontology Studio** 入口。
+
+两点必须知道：
+
+- **宿主半不会热重载**。改了 `index.js` 要先重启宿主；桌面版可以把插件开关关一次再打开，
+  效果等同重载（`ontology_diagnostics` 里的「版本一致」会告诉你现在跑的是哪一版）。
+- **客户端包会被浏览器缓存**。升级后如果面板显示「演示数据」，按 `Ctrl+Shift+R` 强刷。
+
+## 配置
+
+全部配置项写进 profile 里这一行插件的 `config`：
+
+```yaml
+- id: dsh-ontology-studio
+  name: dsh-ontology-studio
+  config:
+    assetsDir: E:/path/to/assets     # 资产目录，默认插件自带 assets/
+    catalogDir: E:/path/to/catalog   # 可安装包目录，默认插件自带 catalog/
+    writeMode: open                  # open（默认）| readonly：只读时写工具根本不注册
+    approval: destructive            # never | destructive（默认）| all
+    context: brief                   # off | brief（默认）| full
+    contextMaxChars: 4000            # 简报字符上限
+    trace: true                      # 执行轨迹开关
+    traceFile: .ontology-traces.jsonl
+    traceMaxLines: 500
+    history: true                    # 变更历史开关
+    historyFile: .ontology-history.jsonl
+    panel: true                      # 面板健康上报开关
+    evals: true                      # 规则评测运行日志开关
+    evalFile: .ontology-evals.jsonl
+    lintRules: []                    # 团队约定（只报建议，不阻断写入）
+```
+
+`lintRules` 的写法：
+
+```yaml
+    lintRules:
+      - id: agent.published
+        target: agent                # package | object | property | action | rule | agent
+        field: status
+        equals: published
+        message: 上线的 Agent 状态必须是 published
+      - id: object.naming
+        target: object
+        field: id
+        pattern: ^[A-Z][A-Za-z0-9]*$
+        message: 对象 id 必须 PascalCase
+```
+
+约定类检查**只出现在 `ontology_validate` 的建议里，不阻断写入**——一条团队约定不该能把平台卡死。
 
 ## 统一本体 IR
 
@@ -68,7 +139,7 @@
               ┌──────────────┼──────────────┐
               ▼              ▼              ▼
       Agent 工具        HTTP API        面板（浏览器）
-   ontology_* (6 个)  /dsh-ontology-*   fetch 同源接口
+   ontology_*（28 个）  /dsh-ontology-*   fetch 同源接口
 ```
 
 ### Agent 工具
@@ -355,7 +426,11 @@ config:
   contextMaxChars: 4000
 ```
 
-这是**发现层**的 Context Engine：让 Agent 知道有什么、该用哪个工具，细节仍按需用 `ontology_get` 拉取。按任务动态挑选相关对象属于任务层，还没做。
+这是**发现层**的 Context Engine：让 Agent 知道有什么、该用哪个工具，细节仍按需用 `ontology_get` 拉取。
+
+任务层也做了，但刻意做得很轻：`agent/pre-step` 只**观察**本轮对话，在简报末尾追加一行
+「本轮可能相关：Inventory」。它从不改写进入这一步的消息——猜错只多一行建议，
+不会让答案缺料。
 
 ## 并发：丢失更新会报错，不会静默
 
@@ -375,10 +450,14 @@ ontology_upsert_object { …, ifEtag: "sha256-3f2a…" }
 
 **2. 每文件写锁。** 所有写入经过同一个串行队列，不会出现两个 `writeFile` 交错写出半截 JSON。
 
-实测：五路并发新增对象 → **1 成功、4 冲突**，最终文件里只多出 1 个对象，没有丢失也没有多余。
+实测：五路并发新增对象 → **五路全部成功，磁盘上五个对象一个不丢**。
+
+（早期版本不是这样：那时读-改-写在锁外，五路里四路会报冲突。v0.28 把整段读改写
+放进文件锁后，并发新增变成排队而不是争抢；显式传 `ifEtag` 时仍然保留 CAS 语义。）
 
 ```bash
 node test/concurrency.test.cjs   # 10 项
+node test/durability.test.cjs    # 9 项：并发不丢数据、无临时文件残留
 ```
 
 边界：这是**单进程内**的保护。多个 DSH 实例共享同一资产目录时没有分布式锁——那需要外部协调（文件租约或数据库），不在当前范围。
@@ -392,12 +471,12 @@ ontology_diagnostics
 ```
 
 ```
-本体工作台 v0.13.0 自检：正常
+本体工作台 v0.34 自检：正常
 ✓ 资产目录：…/assets（1 个资产包）
 ✓ 资产包：1 个全部通过校验
 ✓ 写入能力：可写（审批档位 destructive）
 ✓ 上下文简报：1209 字符，已就绪
-✓ 工具注册：13 个（读写）：ontology_list, ontology_get, …
+✓ 工具注册：28 个（读写）：ontology_list, ontology_get, …
 ✓ 服务 approval：可用
 ✓ 执行轨迹：…/.ontology-traces.jsonl（可写）
 ```
@@ -589,7 +668,21 @@ ontology_asset_catalog
 | `GET /dsh-ontology-studio/history?id=&limit=40` | 资产包的变更历史（新→旧） |
 | `POST /dsh-ontology-studio/panel-report` | 面板上报自己的渲染健康状态（落到 .ontology-panel.jsonl） |
 
-非 GET 返回 405，未知路由 404，handler 抛错返回 500（不会让请求挂住）。面板每个 Studio 的顶栏会显示数据来源：`实时资产` / `演示数据 · 服务未连接`。
+写接口（面板上的人工操作，**不走 Agent 审批闸门**，与直接改 JSON 同层级）：
+
+| 路由 | 作用 |
+| --- | --- |
+| `POST /dsh-ontology-studio/write/save-object` | 新增或替换对象，整包校验通过才落盘 |
+| `POST /dsh-ontology-studio/write/delete-object` | 删除对象；有引用时 409 并列出依赖，`cascade` 才连带清理 |
+| `POST /dsh-ontology-studio/write/save-link` | 新增或替换关系，两端对象必须已存在 |
+| `POST /dsh-ontology-studio/write/delete-link` | 删除关系 |
+| `POST /dsh-ontology-studio/write/save-rule` | 新增或替换规则，保存前真的解析表达式并推导归属 |
+| `POST /dsh-ontology-studio/write/delete-rule` | 删除规则 |
+
+写接口有 CSRF 防护：跨站 `origin` 或 `sec-fetch-site` 一律 403——写路由开在 localhost 上，
+不设防的话用户打开的任意网页都能改他的本体。只读模式下这些接口整体 403。
+
+读接口只接受 GET（其它方法 405），写接口只接受 POST；未知路由 404，handler 抛错返回 500（不会让请求挂住）。面板每个 Studio 的顶栏会显示数据来源：`实时资产` / `演示数据 · 服务未连接`。
 
 ## 测试
 
@@ -602,7 +695,7 @@ npm test        # 二十七组，共 366 项断言
 | `test/ir.test.cjs` | 27 项：Schema 语义、每类错误各一条、未知字段（含拼写错误）、影响分析、仓库读目录 |
 | `test/context.test.cjs` | 10 项：简报内容、级别差异、稳定逐字一致、超长降级与截断 |
 | `test/reverse.test.cjs` | 16 项：类型映射、命名归一、表名单数化、主键回退、关系推断、重复列、预校验、工具不写盘 |
-| `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发只有一个成功、冲突后按返回 etag 重试 |
+| `test/concurrency.test.cjs` | 10 项：etag 稳定性、CAS 成功/过期、写锁不产出半截文件、五路并发全部成功且不丢数据、显式 ifEtag 仍拒绝过期写入 |
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
 | `test/export.test.cjs` | 9 项：类型映射、必填与主键、enum、money、、文档五节、动作可执行标记、工具不写盘 |
@@ -617,10 +710,14 @@ npm test        # 二十七组，共 366 项断言
 | `test/app.test.cjs` | 12 项：每对象一页、数值右对齐、枚举 badge、筛选派生、表单来自 inputSchema、只有声明不生成表单、逐字稳定 |
 | `test/registry.test.cjs` | 12 项：catalog 状态、依赖缺失拒绝安装、重复安装、被依赖拒绝卸载、先卸依赖方、工具层贯通 |
 | `test/history.test.cjs` | 6 项：各类写入留痕、版本号跟随、失败不留痕、过滤与上限、关闭历史 |
-| `test/tools.test.cjs` | 21 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
-| `test/write.test.cjs` | 29 项：对象与关系的增改删、级联、审批闸门、对象与关系的增改删、校验失败不落盘、级联策略、`dryRun`、版本递增、发布拒绝 |
+| `test/tools.test.cjs` | 24 项：激活、`ctx.effect` 挂载、二十八个工具端到端、只读模式只剩十九个读工具、上下文段落与 pre-step 监听注册、缺少可选服务时照常工作、自检报告 |
+| `test/write.test.cjs` | 32 项：对象与关系的增改删、级联、审批闸门、校验失败不落盘、`dryRun` 返回值符合 output schema、版本递增、发布拒绝 |
 | `test/api.test.cjs` | 19 项：六条路由、400/404/405/500、只读与审批标记、面板上报、目录缺失 |
 | `test/e2e.test.cjs` | 12 项：整条链路按真实使用顺序跑一遍（现状→建模→执行→回收→轨迹），验证各工具彼此自洽 |
+| `test/evals.test.cjs` | 11 项：条件指纹可复现、三种可比组合、规则与数据双变被拒、跨包不比较 |
+| `test/harness.test.cjs` | 10 项：六方面覆盖、空包全指出、无主键/孤立对象/全免审批/Agent 三项缺失分别点名 |
+| `test/panel-writes.test.cjs` | 23 项：CSRF 拒绝跨站、校验失败不落盘、级联清理、关系与规则的增删、只读拒绝 |
+| `test/focus-wire.test.cjs` | 8 项：pre-step 观察后简报真的多一行、换一句话换聚焦、监听器永远放行 |
 | `test/render-smoke.cjs` | 九个页面渲染 + 实时数据通路（live model） |
 
 写路径的测试全部在临时目录里跑，**不会改动仓库里的 `assets/`**。
@@ -631,7 +728,7 @@ npm test        # 二十七组，共 366 项断言
 dsh-ontology-studio/
 ├─ package.json            # bundle 清单：dsh.bundle.patch + dsh.client
 ├─ cordis.patch.yml        # 把插件行插入 profile 花名册
-├─ index.js                # 宿主半：六个工具 + 注册 HTTP 路由
+├─ index.js                # 宿主半：28 个工具 + 读写 HTTP 路由 + 上下文注入
 ├─ lib/
 │  ├─ ir.mjs               # 校验器、统计、影响分析（纯函数，无依赖）
 │  ├─ expr.mjs / expr-lexer.mjs  # 规则表达式词法与递归下降求值（不用 eval）
@@ -640,18 +737,31 @@ dsh-ontology-studio/
 │  ├─ context.mjs          # 注入系统提示的本体简报（稳定 + 有界）
 │  ├─ reverse.mjs          # 反向建模：表结构 → 本体草稿
 │  ├─ trace.mjs            # 执行轨迹：追加式 JSONL，超限自动截断
-│  ├─ store.mjs            # 资产仓库：扫目录、mtime 缓存、安全写入、版本递增
-│  └─ api.mjs              # 面板用的只读 JSON 路由
-├─ client.js               # 浏览器半：主面板 + 侧栏入口 + 八个 Studio
+│  ├─ store.mjs            # 资产仓库：扫目录、mtime 缓存、原子写入、CAS、版本递增
+│  ├─ api.mjs              # 面板用的只读 JSON 路由
+│  ├─ panel-writes.mjs     # 面板写路由：对象/关系/规则，CSRF 防护
+│  ├─ registry.mjs         # 资产市场：catalog 扫描、安装、卸载、依赖校验
+│  ├─ diff.mjs             # 两个包按条目对比
+│  ├─ app.mjs              # 元数据 → 页面规格
+│  ├─ sample.mjs           # 样例报文 → 对象草稿
+│  ├─ regression.mjs       # 改动后的回归清单
+│  ├─ harness-check.mjs    # 作为 Agent 底座的六方面体检
+│  ├─ evals.mjs            # 规则评测运行与可比性判定
+│  ├─ focus.mjs            # 任务层聚焦打分
+│  └─ lint.mjs             # config.lintRules 团队约定
+├─ USAGE.md                # 面向使用者的操作说明（面板怎么点、Agent 怎么说）
+├─ client.js               # 浏览器半：主面板 + 侧栏入口 + 九个页面 + 三个编辑器
 ├─ assets/
 │  ├─ ontology-ir.schema.json      # IR 的正式 JSON Schema
 │  ├─ store-inventory.ir.json      # 零售示例资产包
 │  └─ store-inventory.records.json # 示例事实数据（规则跑在它上面）
-├─ test/                   # 五组测试
+├─ catalog/                # 可安装但未加载的资产包（含同 id 的新版本）
+├─ test/                   # 26 个测试文件，npm test 依次跑
 ├─ locale/{en,zh}.json     # 插件管理页的标题、描述、详情文档指向
 ├─ icon.svg
 └─ docs/
    ├─ DETAIL.md            # 插件详情页正文
+   ├─ harness2-notes.md    # 从 Harness² 借了什么、明确不做什么
    └─ plan-source.md       # 规划原文（需求基线，默认不入库）
 ```
 
@@ -666,7 +776,7 @@ dsh-ontology-studio/
 | App Studio（应用依赖本体而非表结构） | `AppPage` 读生成的页面规格并渲染预览 |
 | Governance Center（ID/版本/责任人/审核/审计） | `GovernancePage` 读真实变更历史；权限与审核仍是演示 |
 | Marketplace（三层资产、安装与复用） | `MarketplacePage` 读真实 catalog；依赖校验在工具层 |
-| Observability & Evaluation（Trace 与质量闭环） | `ObservabilityPage`（骨架演示） |
+| Observability & Evaluation（Trace 与质量闭环） | `ObservabilityPage` 读真实轨迹与调用统计 |
 
 ## 路线图
 
@@ -733,5 +843,5 @@ dsh-ontology-studio/
   猜错只多一行建议，不会让答案缺料。真正按任务裁剪没做，那要改写进入每一步的消息，
   风险与收益不成比例。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。
-- **只有一个动作真正可执行**：`adjustInventory` 声明了 `inputSchema` + `effect`，其余三个只有定义；判断标准是「有没有声明 effect」，没有的动作会被直接列出，不会假装执行。
+- **四个动作里三个可执行**：`adjustInventory`、`createTransfer`、`startStocktake` 都声明了 `inputSchema` + `effect`；`createReplenishment` 只有定义。判断标准是「有没有声明 effect」，没有的动作会被直接列出，不会假装执行。
 - **副作用只作用于示例事实数据**：动作改的是 `*.records.json`，没有回写 POS / 供应链系统。
