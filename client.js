@@ -2066,6 +2066,175 @@ window.__ModuleLoader__.load({
       );
     }
 
+
+    var SEVERITIES = ['error', 'warn', 'info'];
+
+    /** Inline editor for one rule. Expressions are parsed by the host on save. */
+    function RuleEditor(props) {
+      const initial = props.initial;
+      const [draft, setDraft] = useState(
+        initial
+          ? JSON.parse(JSON.stringify(initial))
+          : { id: '', name: '', expression: '', severity: 'warn', enabled: true, owner: '' }
+      );
+      const [busy, setBusy] = useState(false);
+      const [problems, setProblems] = useState([]);
+      const [notice, setNotice] = useState('');
+      const isNew = !initial;
+
+      const patch = function (field, value) {
+        const next = JSON.parse(JSON.stringify(draft));
+        next[field] = value;
+        setDraft(next);
+      };
+
+      const save = function () {
+        if (busy) return;
+        setBusy(true);
+        setProblems([]);
+        setNotice('');
+        post('/write/save-rule', { packageId: props.packageId, rule: draft })
+          .then(function (body) {
+            if (body && body.ok) {
+              props.onDone(body);
+              return;
+            }
+            setProblems((body && body.problems) || [{ message: (body && (body.message || body.error)) || '保存失败' }]);
+          })
+          .catch(function (error) {
+            setProblems([{ message: String(error && error.message) }]);
+          })
+          .then(function () {
+            setBusy(false);
+          });
+      };
+
+      const remove = function () {
+        if (busy || isNew) return;
+        setBusy(true);
+        setProblems([]);
+        post('/write/delete-rule', { packageId: props.packageId, ruleId: draft.id })
+          .then(function (body) {
+            if (body && body.ok) {
+              props.onDone(body);
+              return;
+            }
+            setProblems((body && body.problems) || [{ message: (body && (body.message || body.error)) || '删除失败' }]);
+          })
+          .catch(function (error) {
+            setProblems([{ message: String(error && error.message) }]);
+          })
+          .then(function () {
+            setBusy(false);
+          });
+      };
+
+      const field = function (label, value, onChange, placeholder) {
+        return h(
+          'label',
+          { className: 'os-field' },
+          h('span', { className: 'os-field-l' }, label),
+          h('input', {
+            className: 'os-input',
+            value: value || '',
+            placeholder: placeholder || '',
+            onChange: function (event) {
+              onChange(event.target.value);
+            },
+          })
+        );
+      };
+
+      return h(
+        Card,
+        {
+          title: isNew ? '新增规则' : '编辑规则 ' + draft.id,
+          sub: '表达式保存前会真的解析一遍，绑不到对象会被拒绝',
+          extra: h(
+            'button',
+            { type: 'button', className: 'os-btn', onClick: function () { props.onCancel(); } },
+            '取消'
+          ),
+        },
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          field('规则 ID（域.camelCase）', draft.id, function (v) {
+            patch('id', v);
+          }, 'inventory.lockedTooMuch'),
+          field('规则名称', draft.name, function (v) {
+            patch('name', v);
+          }, '锁定量超过在库量')
+        ),
+        field('表达式', draft.expression, function (v) {
+          patch('expression', v);
+        }, 'lockedQty > onHandQty'),
+        h(
+          'div',
+          { className: 'os-grid os-g3' },
+          h(
+            'label',
+            { className: 'os-field' },
+            h('span', { className: 'os-field-l' }, '级别'),
+            h(
+              'select',
+              {
+                className: 'os-input',
+                value: draft.severity,
+                onChange: function (event) {
+                  patch('severity', event.target.value);
+                },
+              },
+              SEVERITIES.map(function (v) {
+                return h('option', { key: v, value: v }, v);
+              })
+            )
+          ),
+          h(
+            'label',
+            { className: 'os-field' },
+            h('span', { className: 'os-field-l' }, '状态'),
+            h(
+              'select',
+              {
+                className: 'os-input',
+                value: draft.enabled === false ? 'off' : 'on',
+                onChange: function (event) {
+                  patch('enabled', event.target.value === 'on');
+                },
+              },
+              [h('option', { key: 'on', value: 'on' }, '启用'), h('option', { key: 'off', value: 'off' }, '停用')]
+            )
+          ),
+          field('维护人', draft.owner, function (v) {
+            patch('owner', v);
+          }, '供应链数字化组')
+        ),
+        problems.length
+          ? h(
+              'div',
+              { className: 'os-card-b', style: { marginTop: 10 } },
+              problems.map(function (pr, i) {
+                return h(
+                  'div',
+                  { key: i, className: 'os-row' },
+                  h(Badge, { tone: 'err' }, pr.code || '错误'),
+                  h('span', { className: 'os-grow' }, (pr.path ? pr.path + ' — ' : '') + (pr.message || ''))
+                );
+              })
+            )
+          : null,
+        h(
+          'div',
+          { style: { marginTop: 14, display: 'flex', gap: 8, alignItems: 'center' } },
+          h('button', { type: 'button', className: 'os-btn pri', onClick: save, disabled: busy }, busy ? '保存中…' : '保存'),
+          isNew ? null : h('button', { type: 'button', className: 'os-btn', onClick: remove, disabled: busy }, '删除规则'),
+          h('span', { className: 'os-grow' }),
+          h('span', { className: 'os-muted' }, '表达式会被真正解析，写错立刻知道')
+        )
+      );
+    }
+
     /** Rules and actions straight from the loaded package when it is live. */
     function logicModel(model) {
       const pkg = model && model.live ? model.pkg : null;
@@ -2113,6 +2282,12 @@ window.__ModuleLoader__.load({
       // The panel's only actionable control: rule evaluation is read-only, so it
       // needs no approval. Writes stay tool-only on purpose.
       const [run, setRun] = useState(null);
+      const [editing, setEditing] = useState(null);
+      const packageId = model && model.pkg ? model.pkg.id : null;
+      const afterWrite = function () {
+        setEditing(null);
+        if (typeof props.onSaved === 'function') props.onSaved();
+      };
       const [busy, setBusy] = useState(false);
       const runEvaluation = function () {
         if (!model.pkg || busy) return;
@@ -2131,6 +2306,21 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'os-grid' },
+        editing && packageId
+          ? h(RuleEditor, {
+              packageId: packageId,
+              initial:
+                editing === 'new'
+                  ? null
+                  : (model.pkg.rules || []).filter(function (r) {
+                      return r.id === editing;
+                    })[0],
+              onDone: afterWrite,
+              onCancel: function () {
+                setEditing(null);
+              },
+            })
+          : null,
         h(
           Card,
           {
@@ -2138,9 +2328,18 @@ window.__ModuleLoader__.load({
             sub: data.live ? '来自当前资产包，可被 ontology_evaluate_rules 真正求值' : '演示数据',
             extra: data.live
               ? h(
-                  'button',
-                  { type: 'button', className: 'os-btn', onClick: runEvaluation, disabled: busy },
-                  busy ? '求值中…' : '在示例数据上跑一次'
+                  'div',
+                  { style: { display: 'flex', gap: 6 } },
+                  h(
+                    'button',
+                    { type: 'button', className: 'os-btn', onClick: function () { setEditing('new'); } },
+                    '+ 新增规则'
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'os-btn', onClick: runEvaluation, disabled: busy },
+                    busy ? '求值中…' : '在示例数据上跑一次'
+                  )
                 )
               : null,
             flush: true,
@@ -2157,6 +2356,36 @@ window.__ModuleLoader__.load({
               },
               { key: 'enabled', label: '状态', render: (r) => h(Badge, { tone: r.enabled ? 'on' : 'warn' }, r.enabled ? '启用' : '已停用') },
               { key: 'owner', label: '维护人' },
+              {
+                key: 'ops',
+                label: '',
+                width: '16%',
+                render: (r) =>
+                  packageId && model.pkg
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', gap: 6 } },
+                        h(
+                          'button',
+                          { type: 'button', className: 'os-btn', onClick: function () { setEditing(r.id); } },
+                          '编辑'
+                        ),
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'os-btn',
+                            onClick: function () {
+                              post('/write/delete-rule', { packageId: packageId, ruleId: r.id }).then(function () {
+                                if (typeof props.onSaved === 'function') props.onSaved();
+                              });
+                            },
+                          },
+                          '删除'
+                        )
+                      )
+                    : null,
+              },
             ],
             rows: data.rules.map((r) => Object.assign({ key: r.id }, r)),
           })

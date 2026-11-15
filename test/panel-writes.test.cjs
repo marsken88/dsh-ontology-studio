@@ -275,6 +275,57 @@ function post(handler, url, body, headers = {}) {
     assert.equal(r.code, 404);
   });
 
+  console.log('\n规则');
+
+  await it('新增规则并返回它绑定到哪个对象', async () => {
+    const dir = tempDir();
+    const store = createStore({ dir });
+    const { handler, history } = boot({ store });
+    const r = await post(handler, '/dsh-ontology-studio/write/save-rule', {
+      packageId: 'retail.store-inventory',
+      rule: { id: 'inventory.lockedTooMuch', name: '锁定量超过在库', expression: 'lockedQty > onHandQty', severity: 'warn', enabled: true },
+    });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    assert.equal(r.body.bindsTo, 'Inventory');
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'));
+    assert.ok(onDisk.rules.some((x) => x.id === 'inventory.lockedTooMuch'));
+    assert.equal(history[0].op, 'upsert_rule');
+  });
+
+  await it('表达式解析不到对象时拒绝并说明原因', async () => {
+    const store = createStore({ dir: tempDir() });
+    const { handler } = boot({ store });
+    const r = await post(handler, '/dsh-ontology-studio/write/save-rule', {
+      packageId: 'retail.store-inventory',
+      rule: { id: 'inventory.ghostRule', name: '坏规则', expression: 'nopeDays > 3', severity: 'warn', enabled: true },
+    });
+    assert.equal(r.code, 422);
+    assert.equal(r.body.error, 'invalid_expression');
+    assert.ok(r.body.problems[0].message.includes('nopeDays'));
+  });
+
+  await it('表达式语法错误被拒绝', async () => {
+    const store = createStore({ dir: tempDir() });
+    const { handler } = boot({ store });
+    const r = await post(handler, '/dsh-ontology-studio/write/save-rule', {
+      packageId: 'retail.store-inventory',
+      rule: { id: 'inventory.syntaxRule', name: '语法错', expression: 'qty >', severity: 'warn', enabled: true },
+    });
+    assert.equal(r.code, 422);
+  });
+
+  await it('删除规则', async () => {
+    const dir = tempDir();
+    const store = createStore({ dir });
+    const { handler } = boot({ store });
+    const current = JSON.parse(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'));
+    const victim = current.rules[0].id;
+    const r = await post(handler, '/dsh-ontology-studio/write/delete-rule', { packageId: 'retail.store-inventory', ruleId: victim });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'store-inventory.ir.json'), 'utf8'));
+    assert.ok(!onDisk.rules.some((x) => x.id === victim));
+  });
+
   console.log('\n模式与协议');
 
   await it('只读模式一律 403，且磁盘不变', async () => {
