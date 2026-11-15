@@ -200,6 +200,36 @@ Agent 会调 `ontology_*` 工具。**写操作会弹审批卡片**——你点�
 
 每条缺口都带「怎么补」。**就绪不等于没问题**：缺口是缺一块，提示是有但不完整。
 
+## 评测：同一套规则，换一份数据跑
+
+规则改完到底变好还是变坏，靠感觉不行。这个流程把每次运行的条件记下来，**条件不一样的两次拒绝比较**。
+
+```
+ontology_eval_run({ packageId: "retail.store-inventory" })
+→ 评测 run-xxx：11 行，2 条规则生效，4 处违规
+  条件指纹：规则 sha256-cfff…，数据 sha256-5c9a…
+
+ontology_eval_run({ packageId: "retail.store-inventory", records: { objects: { … } } })
+→ 评测 run-yyy：5 行，1 处违规
+
+ontology_eval_compare()
+→ run-xxx → run-yyy（数据变了（规则未变））
+  违规 -3，涉及规则 -1
+  inventory.lowStockWarning：3 → 1（-2）
+```
+
+对比只在两种情况下允许：
+
+| 规则 | 数据 | 结果 |
+| --- | --- | --- |
+| 变 | 不变 | 可比：规则改动的影响 |
+| 不变 | 变 | 可比：规则在新数据上的表现 |
+| 都变 | 都变 | **拒绝**：说不清差异来自哪一边，请固定其中一个 |
+| 资产包不同 | — | **拒绝** |
+
+这条纪律来自 [Harness²](https://github.com/google-research/harness2) 的实验指南：
+判定与报告必须用同一组条件，否则数字没有意义。
+
 ## 六、出问题了怎么办
 
 | 现象 | 原因 | 怎么办 |

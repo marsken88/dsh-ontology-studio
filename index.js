@@ -28,11 +28,12 @@ import { buildRegressionPlan } from './lib/regression.mjs';
 import { applyLint } from './lib/lint.mjs';
 import { focusOf, messageText } from './lib/focus.mjs';
 import { harnessCheck } from './lib/harness-check.mjs';
+import { runEvaluation, compareRuns } from './lib/evals.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.33.0';
+const CODE_VERSION = '0.34.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -73,6 +74,13 @@ export function apply(ctx, config = {}) {
     file: config.historyFile ? path.resolve(config.historyFile) : path.join(path.dirname(assetsDir), '.ontology-history.jsonl'),
     maxLines: Number.isFinite(config.historyMaxLines) ? config.historyMaxLines : 2000,
     enabled: config.history !== false,
+  });
+
+  /** Evaluation runs, so two results can be compared later under known conditions. */
+  const evals = createTraceStore({
+    file: config.evalFile ? path.resolve(config.evalFile) : path.join(path.dirname(assetsDir), '.ontology-evals.jsonl'),
+    maxLines: Number.isFinite(config.evalMaxLines) ? config.evalMaxLines : 500,
+    enabled: config.evals !== false,
   });
 
   const panel = createTraceStore({
@@ -1454,6 +1462,130 @@ export function apply(ctx, config = {}) {
         }),
         usage: { byTool, unattributed, scanned: entries.length, traceFile: trace.file },
       };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_eval_run / ontology_eval_compare
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_eval_run',
+    description:
+      '跑一次规则评测并把这次运行记录下来：跑在哪个资产包、哪套规则、哪份数据上，违规分布是什么。记录下来的运行才能和另一次对比——条件不同的结果不可比。可传 records 用候选数据试规则。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        records: { type: 'object', description: '可选：用这份候选事实数据（形如 {objects:{...}}），默认用资产包自带的' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          run: { type: 'object' },
+          runs: { type: 'number' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`评测失败：${v.message || '未知原因'}`);
+        const r = v.run;
+        const lines = [
+          `评测 ${r.id}：${r.packageId} v${r.packageVersion}`,
+          `  ${r.rows} 行数据，${r.evaluated} 条规则生效，${r.violations} 处违规（涉及 ${r.violatingRules} 条规则）`,
+        ];
+        for (const rule of r.byRule.filter((x) => x.violations > 0)) {
+          lines.push(`  ${rule.rule}（${rule.object}）：${rule.violations} 处`);
+        }
+        if (r.unresolved) lines.push(`  ${r.unresolved} 条规则无法解析归属`);
+        lines.push(`条件指纹：规则 ${r.conditions.rules}，数据 ${r.conditions.data}`);
+        lines.push(`已记录，共 ${v.runs} 次运行`);
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+
+      let records = args.records;
+      let recordsFile = null;
+      if (!records) {
+        const loaded = await loadRecords(entry.file);
+        if (!loaded.records) return { ok: false, message: loaded.problems.join('；') || '没有事实数据' };
+        records = loaded.records;
+        recordsFile = loaded.file;
+      }
+
+      const run = runEvaluation(entry.ir, records, { packageFile: entry.path, recordsFile });
+      await evals.append(run);
+      const all = await evals.list(200);
+      return { ok: true, run, runs: all.length };
+    },
+  });
+
+  register({
+    name: 'ontology_eval_compare',
+    description:
+      '对比两次规则评测。默认比最近两次。只有条件受控时才允许比较：规则和数据都变了会拒绝，并说明该怎么固定其中一边。',
+    parameters: {
+      type: 'object',
+      properties: {
+        runA: { type: 'string', description: '可选：基准运行 id（默认倒数第二次）' },
+        runB: { type: 'string', description: '可选：目标运行 id（默认最后一次）' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          comparison: { type: 'object' },
+          runs: { type: 'array' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`对比失败：${v.message || '未知原因'}`);
+        const c = v.comparison;
+        if (!c.comparable) {
+          return text(
+            `不可比：${c.reason}\n已有运行：` +
+              (v.runs || []).map((r) => `${r.id}（v${r.packageVersion}，${r.violations} 处违规）`).join('；')
+          );
+        }
+        const d = c.delta;
+        const lines = [
+          `${c.from.id} → ${c.to.id}（${c.varies}）`,
+          `  违规 ${d.violations >= 0 ? '+' : ''}${d.violations}，涉及规则 ${d.violatingRules >= 0 ? '+' : ''}${d.violatingRules}，无法解析 ${d.unresolved >= 0 ? '+' : ''}${d.unresolved}`,
+        ];
+        for (const rule of c.perRule.filter((r) => r.delta !== 0 || r.status !== 'common')) {
+          const tag = rule.status === 'added' ? '新增规则' : rule.status === 'removed' ? '规则已删' : `${rule.before} → ${rule.after}`;
+          lines.push(`  ${rule.rule}：${tag}（${rule.delta >= 0 ? '+' : ''}${rule.delta}）`);
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const all = await evals.list(200);
+      const runs = all.map((r) => ({ id: r.id, ts: r.ts, packageVersion: r.packageVersion, violations: r.violations }));
+      if (all.length < 2) {
+        return { ok: false, runs, message: `至少需要两次运行才能对比，当前只有 ${all.length} 次` };
+      }
+      const pick = (id, fallback) => (id ? all.find((r) => r.id === id) : all[fallback]);
+      // evals.list returns newest first
+      const b = pick(args.runB, 0);
+      const a = pick(args.runA, 1);
+      if (!a || !b) {
+        return { ok: false, runs, message: `找不到指定的运行：${!a ? 'runA' : 'runB'}` };
+      }
+      return { ok: true, comparison: compareRuns(a, b), runs };
     },
   });
 

@@ -10,7 +10,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.33
+## 当前状态：v0.34
 
 | 部分 | 状态 |
 | --- | --- |
@@ -89,6 +89,8 @@
 | `ontology_generate_app` | 读 | 由对象元数据生成页面规格（列/筛选器/操作表单） |
 | `ontology_agents` | 读 | Agent 花名册（声明）+ 实际调用（轨迹） |
 | `ontology_harness_check` | 读 | 体检：作为 Agent 底座还缺什么（结构/规则/动作/护栏/数据/Agent） |
+| `ontology_eval_run` | 读 | 跑一次规则评测并记录条件指纹（包/规则/数据） |
+| `ontology_eval_compare` | 读 | 对比两次评测；规则与数据同时变了会拒绝比较 |
 | `ontology_install_asset` | **写** | 从 catalog 安装一个包，缺依赖则拒绝 |
 | `ontology_uninstall_asset` | **写** | 卸载一个包，被依赖则拒绝 |
 | `ontology_diff` | 读 | 对比两个包，按对象/关系/规则/动作/策略/Agent 分组 |
@@ -592,7 +594,7 @@ ontology_asset_catalog
 ## 测试
 
 ```bash
-npm test        # 二十六组，共 355 项断言
+npm test        # 二十七组，共 366 项断言
 ```
 
 | 文件 | 覆盖 |
