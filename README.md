@@ -8,7 +8,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.25
+## 当前状态：v0.26
 
 | 部分 | 状态 |
 | --- | --- |
@@ -578,6 +578,7 @@ ontology_asset_catalog
 | `GET /dsh-ontology-studio/catalog` | 资产市场状态 |
 | `GET /dsh-ontology-studio/app-spec?id=` | 生成的应用页面规格 |
 | `GET /dsh-ontology-studio/agents?id=` | Agent 花名册与调用统计 |
+| `GET /dsh-ontology-studio/evaluate?id=` | 在示例数据上跑规则求值（只读，面板可点） |
 | `GET /dsh-ontology-studio/records?id=<包id>&object=&limit=` | 事实数据的行数抽样 |
 | `GET /dsh-ontology-studio/history?id=&limit=40` | 资产包的变更历史（新→旧） |
 | `POST /dsh-ontology-studio/panel-report` | 面板上报自己的渲染健康状态（落到 .ontology-panel.jsonl） |
@@ -587,7 +588,7 @@ ontology_asset_catalog
 ## 测试
 
 ```bash
-npm test        # 二十组，共 282 项断言
+npm test        # 二十一组，共 291 项断言
 ```
 
 | 文件 | 覆盖 |

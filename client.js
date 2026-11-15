@@ -1455,6 +1455,24 @@ window.__ModuleLoader__.load({
     function LogicPage(props) {
       const model = (props && props.model) || buildModel({ phase: 'demo' });
       const data = logicModel(model);
+      // The panel's only actionable control: rule evaluation is read-only, so it
+      // needs no approval. Writes stay tool-only on purpose.
+      const [run, setRun] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const runEvaluation = function () {
+        if (!model.pkg || busy) return;
+        setBusy(true);
+        get('/evaluate?id=' + encodeURIComponent(model.pkg.id))
+          .then(function (body) {
+            setRun((body && body.value) || { available: false, message: '没有返回结果' });
+          })
+          .catch(function (error) {
+            setRun({ available: false, message: String(error && error.message) });
+          })
+          .then(function () {
+            setBusy(false);
+          });
+      };
       return h(
         'div',
         { className: 'os-grid' },
@@ -1463,6 +1481,13 @@ window.__ModuleLoader__.load({
           {
             title: '业务规则',
             sub: data.live ? '来自当前资产包，可被 ontology_evaluate_rules 真正求值' : '演示数据',
+            extra: data.live
+              ? h(
+                  'button',
+                  { type: 'button', className: 'os-btn', onClick: runEvaluation, disabled: busy },
+                  busy ? '求值中…' : '在示例数据上跑一次'
+                )
+              : null,
             flush: true,
           },
           h(Table, {
@@ -1481,6 +1506,49 @@ window.__ModuleLoader__.load({
             rows: data.rules.map((r) => Object.assign({ key: r.id }, r)),
           })
         ),
+        run
+          ? h(
+              Card,
+              { title: '求值结果', sub: '刚刚在示例事实数据上跑的一次（只读，未写盘）', flush: true },
+              run.available === false
+                ? h('div', { className: 'os-card-b os-muted' }, run.message || '无法求值')
+                : h(
+                    'div',
+                    null,
+                    h(
+                      'div',
+                      { style: { padding: '10px 14px', display: 'flex', gap: 16, flexWrap: 'wrap' } },
+                      h(Badge, { tone: run.summary.violations ? 'warn' : 'on' }, run.summary.violations + ' 处违规'),
+                      h('span', { className: 'os-muted' }, run.summary.evaluated + ' 条规则生效'),
+                      h('span', { className: 'os-muted' }, run.summary.rows + ' 行数据'),
+                      run.summary.unresolved ? h('span', { className: 'os-muted' }, run.summary.unresolved + ' 条无法解析归属') : null
+                    ),
+                    h(Table, {
+                      columns: [
+                        { key: 'rule', label: '规则', render: (r) => h('span', { className: 'os-mono' }, r.rule) },
+                        { key: 'object', label: '对象' },
+                        { key: 'evaluated', label: '求值行数', width: '12%' },
+                        {
+                          key: 'violations',
+                          label: '违规',
+                          width: '12%',
+                          render: (r) => h(Badge, { tone: r.violations.length ? 'warn' : 'on' }, String(r.violations.length)),
+                        },
+                      ],
+                      rows: (run.results || []).map((r) => Object.assign({ key: r.rule }, r)),
+                    }),
+                    (run.skipped || []).length
+                      ? h(
+                          'div',
+                          { style: { padding: '8px 14px 12px' } },
+                          (run.skipped || []).map((s) =>
+                            h('div', { key: s.rule, className: 'os-row os-muted' }, '跳过 ' + s.rule + '：' + s.reason)
+                          )
+                        )
+                      : null
+                  )
+            )
+          : null,
         h(
           Card,
           {

@@ -30,7 +30,7 @@ import { focusOf, messageText } from './lib/focus.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.25.1';
+const CODE_VERSION = '0.26.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -197,6 +197,18 @@ export function apply(ctx, config = {}) {
       history,
       panel,
       catalog: () => catalogState({ catalogDir, assetsDir: store.dir }),
+      // Read-only: the panel may run this without an approval, because nothing
+      // is written. Write operations stay tool-only on purpose.
+      evaluate: async (id) => {
+        const { entry } = await store.get(id);
+        if (!entry || !entry.ir) return null;
+        const loaded = await loadRecords(entry.file);
+        if (!loaded.records) {
+          return { packageId: id, available: false, message: loaded.problems.join('；') || '没有示例事实数据' };
+        }
+        const result = evaluateRules(entry.ir, loaded.records);
+        return Object.assign({ packageId: id, available: true }, result);
+      },
       agents: async (id) => {
         const { entry } = await store.get(id);
         if (!entry || !entry.ir) return null;

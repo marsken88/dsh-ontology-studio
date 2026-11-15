@@ -3,6 +3,8 @@
  * request/response stubs, no server needed. Run `node test/api.test.cjs`.
  */
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
@@ -270,6 +272,46 @@ async function call(route, url, method = 'GET', body) {
     assert.deepEqual(body.value.packages, []);
   });
 
+  await it('/evaluate 返回规则求值结果（只读）', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ontology-eval-'));
+    fs.copyFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), path.join(dir, 'store-inventory.ir.json'));
+    fs.copyFileSync(path.join(ROOT, 'assets', 'store-inventory.records.json'), path.join(dir, 'store-inventory.records.json'));
+
+    const mod = await import('../index.js');
+    const routes = [];
+    mod.apply(
+      {
+        tools: { register: () => () => {} },
+        effect: (run) => run(),
+        inject: (deps, cb) => {
+          if (deps.includes('webServer')) cb({ webServer: { register: (r) => { routes.push(r); return () => {}; } } });
+          return () => {};
+        },
+        get: () => undefined,
+        on: () => {},
+        off: () => {},
+      },
+      { assetsDir: dir, trace: false, approval: 'never' }
+    );
+
+    const call = (url) =>
+      new Promise((resolve) => {
+        const res = { writeHead: (code) => { res.code = code; }, end: (body) => resolve({ code: res.code, body: JSON.parse(body || '{}') }) };
+        routes[0].handler({ method: 'GET', url, headers: {}, on() { return this; }, destroy() {} }, res);
+      });
+
+    const ok = await call('/dsh-ontology-studio/evaluate?id=retail.store-inventory');
+    assert.equal(ok.code, 200);
+    assert.equal(ok.body.value.available, true);
+    assert.equal(ok.body.value.summary.rows, 11);
+    assert.equal(ok.body.value.summary.violations, 4);
+
+    const missingId = await call('/dsh-ontology-studio/evaluate');
+    assert.equal(missingId.code, 400);
+
+    const notFound = await call('/dsh-ontology-studio/evaluate?id=ghost');
+    assert.equal(notFound.code, 404);
+  });
   await it('handler 抛错时返回 500 而不是让请求挂住', async () => {
     const broken = {
       list: async () => {
