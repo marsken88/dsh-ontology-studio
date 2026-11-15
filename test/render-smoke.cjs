@@ -119,6 +119,24 @@ React.__setLive({
   file: '<assets>/store-inventory.ir.json',
   ir,
   error: null,
+  appSpec: {
+    appId: ir.id + '.app',
+    title: ir.name,
+    generatedFrom: { packageId: ir.id, version: ir.version },
+    objectCount: 2,
+    pageCount: 2,
+    pages: [
+      { id: 'Inventory.list', kind: 'list', title: '库存', source: 'Inventory', keyFields: ['storeId', 'skuId'],
+        columns: [
+          { field: 'storeId', label: '门店编号', type: 'string', align: 'left', display: 'text', sortable: true },
+          { field: 'availableQty', label: '可售数量', type: 'number', align: 'right', display: 'text', sortable: true },
+        ],
+        filters: [{ field: 'updatedAt', label: '更新时间', kind: 'dateRange' }],
+        detailFields: [],
+        actions: [{ actionId: 'adjustInventory', label: '库存调整', approvalRequired: true, effectCount: 1, form: [{ field: 'storeId', label: '门店编号', type: 'string', required: true }] }] },
+    ],
+    notes: [],
+  },
   catalog: {
     available: [
       { id: 'retail.member-loyalty', name: '会员权益资产包', version: '0.2.0', objects: 3, rules: 2, actions: 2, dependsOn: ['retail.store-inventory'], installed: false, ok: true },
@@ -154,6 +172,7 @@ const expectations = {
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行'],
   governance: ['变更历史', 'upsert_object', 'v1.1.0'],
   marketplace: ['资产市场', '会员权益资产包', '可安装'],
+  app: ['页面清单', '操作表单', 'adjustInventory'],
 };
 for (const p of Object.keys(expectations)) {
   React.__setPage(p === 'overview' ? null : p);

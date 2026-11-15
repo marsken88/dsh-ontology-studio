@@ -679,7 +679,7 @@ window.__ModuleLoader__.load({
     const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
 
     function useOntologyState() {
-      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null });
+      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null, appSpec: null });
       useEffect(function () {
         let alive = true;
         const get = function (path) {
@@ -690,7 +690,7 @@ window.__ModuleLoader__.load({
           );
         };
         if (typeof fetch !== 'function') {
-          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null, history: [], catalog: null });
+          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null, history: [], catalog: null, appSpec: null });
           return function () {};
         }
         get('/status')
@@ -699,7 +699,7 @@ window.__ModuleLoader__.load({
             const value = body && body.value;
             const first = value && value.packages ? value.packages.filter(function (p) { return p.ok; })[0] : null;
             if (!first) {
-              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null });
+              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null, appSpec: null });
               return null;
             }
             return get('/package?id=' + encodeURIComponent(first.id)).then(function (pkg) {
@@ -716,12 +716,16 @@ window.__ModuleLoader__.load({
                 get('/catalog').catch(function () {
                   return { value: null };
                 }),
+                get('/app-spec?id=' + encodeURIComponent(first.id)).catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
                 const records = (both[1] && both[1].value) || null;
                 const historyEntries = (both[2] && both[2].value && both[2].value.entries) || [];
                 const catalog = (both[3] && both[3].value) || null;
+                const appSpec = (both[4] && both[4].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -732,13 +736,14 @@ window.__ModuleLoader__.load({
                   records: records,
                   history: historyEntries,
                   catalog: catalog,
+                  appSpec: appSpec,
                 });
               });
             });
           })
           .catch(function (error) {
             if (alive) {
-              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null, history: [], catalog: null });
+              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null, history: [], catalog: null, appSpec: null });
             }
           });
         return function () {
@@ -825,6 +830,7 @@ window.__ModuleLoader__.load({
           records: state.records || null,
           history: state.history || [],
           catalog: state.catalog || null,
+          appSpec: state.appSpec || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -845,6 +851,7 @@ window.__ModuleLoader__.load({
         records: null,
         history: [],
         catalog: null,
+        appSpec: null,
         dir: null,
         file: null,
         problems: [],
@@ -1570,7 +1577,120 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function AppPage() {
+    function AppLivePage(props) {
+      const spec = props.model.appSpec;
+      const [picked, setPicked] = useState((spec.pages[0] || {}).id || '');
+      const page = spec.pages.filter(function (p) { return p.id === picked; })[0] || spec.pages[0];
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: String(spec.pageCount), label: '生成页面', delta: spec.objectCount + ' 个对象' }),
+          h(Stat, { value: String(spec.pages.reduce(function (n, p) { return n + p.columns.length; }, 0)), label: '列表列', delta: '来自属性声明' }),
+          h(Stat, { value: String(spec.pages.reduce(function (n, p) { return n + p.actions.length; }, 0)), label: '操作表单', delta: '来自 action inputSchema' }),
+          h(Stat, { value: 'v' + spec.generatedFrom.version, label: '元数据版本', delta: spec.generatedFrom.packageId })
+        ),
+        h(
+          Card,
+          { title: '页面清单', sub: '应用依赖 Ontology 定义，属性一变规格就跟着变', extra: h(Badge, { tone: 'on' }, '自动生成'), flush: true },
+          h(
+            'div',
+            { style: { padding: '10px 14px', display: 'flex', flexWrap: 'wrap', gap: 6 } },
+            spec.pages.map(function (p) {
+              return h(
+                'button',
+                {
+                  key: p.id,
+                  type: 'button',
+                  className: 'os-btn' + (page && p.id === page.id ? ' pri' : ''),
+                  onClick: function () {
+                    setPicked(p.id);
+                  },
+                },
+                p.title + ' · ' + p.columns.length + ' 列'
+              );
+            })
+          )
+        ),
+        page
+          ? h(
+              Card,
+              { title: page.title + '（' + page.kind + '）', sub: '来源对象 ' + page.source, flush: true },
+              h(Table, {
+                columns: [
+                  { key: 'label', label: '列', render: function (r) { return h('span', { style: { fontWeight: 600 } }, r.label); } },
+                  { key: 'field', label: '字段', render: function (r) { return h('span', { className: 'os-mono' }, r.field); } },
+                  { key: 'type', label: '类型' },
+                  { key: 'display', label: '渲染' },
+                  { key: 'align', label: '对齐', width: '10%' },
+                ],
+                rows: page.columns.map(function (c) { return Object.assign({ key: c.field }, c); }),
+              })
+            )
+          : null,
+        h(
+          'div',
+          { className: 'os-grid os-g2' },
+          h(
+            Card,
+            { title: '筛选器', flush: true },
+            page && page.filters.length
+              ? h(Table, {
+                  columns: [
+                    { key: 'label', label: '筛选' },
+                    { key: 'field', label: '字段', render: function (r) { return h('span', { className: 'os-mono' }, r.field); } },
+                    { key: 'kind', label: '控件', render: function (r) { return h(Badge, { tone: 'brand' }, r.kind); } },
+                  ],
+                  rows: page.filters.map(function (f) { return Object.assign({ key: f.field }, f); }),
+                })
+              : h('div', { className: 'os-card-b os-muted' }, '这个对象没有可枚举/可日期过滤的属性，列表页不带筛选器。')
+          ),
+          h(
+            Card,
+            { title: '操作表单', flush: true },
+            page && page.actions.length
+              ? h(Table, {
+                  columns: [
+                    { key: 'label', label: '操作' },
+                    {
+                      key: 'approvalRequired',
+                      label: '审批',
+                      width: '14%',
+                      render: function (r) { return h(Badge, { tone: r.approvalRequired ? 'warn' : 'on' }, r.approvalRequired ? '需审批' : '免审批'); },
+                    },
+                    {
+                      key: 'form',
+                      label: '表单字段',
+                      render: function (r) {
+                        return h(
+                          'span',
+                          { className: 'os-mono os-muted' },
+                          r.form.map(function (f) { return f.field + (f.required ? '*' : ''); }).join(', ')
+                        );
+                      },
+                    },
+                  ],
+                  rows: page.actions.map(function (a) { return Object.assign({ key: a.actionId }, a); }),
+                })
+              : h('div', { className: 'os-card-b os-muted' }, '这个对象没有可执行动作，页面不含操作表单。')
+          )
+        ),
+        (spec.notes || []).length
+          ? h(
+              Notes,
+              null,
+              '生成时的提示：' + spec.notes.join('；')
+            )
+          : null,
+        h(Notes, null, '这是由本体元数据生成的页面规格，不是可交互应用：真正渲染还需一个前端把规格转成组件。面板只展示规格，不发起任何业务操作。')
+      );
+    }
+
+    function AppPage(props) {
+      const model = (props && props.model) || buildModel({ phase: 'demo' });
+      if (model.live && model.appSpec && (model.appSpec.pages || []).length) return h(AppLivePage, { model: model });
       return h(
         'div',
         { className: 'os-grid' },

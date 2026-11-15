@@ -6,7 +6,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.19
+## 当前状态：v0.20
 
 | 部分 | 状态 |
 | --- | --- |
@@ -23,12 +23,13 @@
 | 执行轨迹 | ✅ 每次工具调用落一行 JSONL，面板可读 |
 | Action 执行器 | ✅ 入参校验 → 审批 → 单/多 effect（赋值或增量）→ 规则回验 |
 | Context Engine | ✅ 本体简报注入系统提示，稳定且有界，写入后自动刷新 |
-| 面板实时化 | ✅ 总览/本体/数据接入/逻辑动作/治理/市场/可观测七页读真实资产（其余两页仍是演示） |
+| 面板实时化 | ✅ 除「Agent & Harness」外八页读真实资产 |
 | 并发控制 | ✅ 乐观锁（etag CAS）+ 文件写锁，丢失更新会明确报冲突 |
 | 版本历史 | ✅ 每次写入追加一条 JSONL，可查「改过什么、在哪个版本」 |
 | 反向建模 | ✅ 从表结构生成本体草稿：类型映射、命名归一、主键推断、关系建议、预校验 |
 | 产物导出 | ✅ IR → JSON Schema（draft 2020-12）/ Markdown 参考文档 |
 | 资产市场 | ✅ catalog 安装/卸载，依赖不满足则拒绝（两个方向都拦） |
+| 应用构建 | ✅ 从对象元数据生成页面规格：列/筛选器/操作表单 |
 | 图存储、数据同步、联邦查询 | ❌ 未开始（规划为独立服务） |
 
 为什么先做成 DSH 插件而不是独立 Web 应用：
@@ -78,6 +79,7 @@
 | `ontology_history` | 读 | 变更历史：谁在哪个版本改了什么 |
 | `ontology_export` | 读 | 导出 JSON Schema 或 Markdown 文档（只返回内容，不写文件） |
 | `ontology_asset_catalog` | 读 | 资产市场：可安装 / 已安装 / 依赖是否满足 |
+| `ontology_generate_app` | 读 | 由对象元数据生成页面规格（列/筛选器/操作表单） |
 | `ontology_install_asset` | **写** | 从 catalog 安装一个包，缺依赖则拒绝 |
 | `ontology_uninstall_asset` | **写** | 卸载一个包，被依赖则拒绝 |
 | `ontology_upsert_object` | **写** | 新增或替换一个对象定义 |
@@ -459,6 +461,36 @@ ontology_export({ packageId, format: "json-schema" | "markdown", objectId? })
 
 只返回内容、不写文件——落在哪里由调用方决定，插件不替人做目录决策。
 
+## 应用构建：从元数据生成页面规格
+
+「应用依赖 Ontology 定义，而不是底层表结构」——这句要能兑现，得先有一样东西：把对象元数据翻译成页面规格。
+```
+ontology_generate_app({ packageId, objects: ["Inventory"] })
+```
+
+```
+门店-商品-库存 · 应用规格（6 页，来自 retail.store-inventory v1.0.0）
+
+库存（list）：7 列，1 个筛选器
+  列：门店编号 / SKU 编号 / 在库数量 / 可售数量 / 锁定数量 / 安全库存 / 更新时间
+  筛选：更新时间（dateRange）
+  操作：库存调整（需审批）— 表单 storeId*, skuId*, availableQty*
+        发起调拨（需审批）— 表单 fromStoreId*, toStoreId*, skuId*, qty*
+```
+
+派生规则都是确定性的：
+
+| 来源 | 生成 |
+| --- | --- |
+| 属性声明 | 列表列（数值右对齐、枚举渲染成 badge、json 不进列表但进详情） |
+| 枚举 / 日期属性 | 筛选器（select / dateRange） |
+| action 的 inputSchema | 操作表单（保留必填标记与枚举取值） |
+| 只有声明没有 effect 的动作 | 不生成表单，并在提示里点名 |
+
+同一份 IR 生成**逐字相同**的规格，所以可以做快照对比——改一个属性，diff 里能直接看到多了一列。
+
+面板的「应用构建」页读这个规格并渲染成预览。**它不是可交互应用**：规格到组件还需要一个渲染器，这一步没做，也不假装做了。
+
 ## 资产市场：安装、卸载、依赖
 
 `catalog/` 里放着**可安装**的资产包（不加载），`assets/` 里是**已安装**的（运行时读取）。安装就是复制过去。
@@ -493,6 +525,7 @@ ontology_asset_catalog
 | `GET /dsh-ontology-studio/impact?id=<包id>&object=<对象id>` | 对象影响分析 |
 | `GET /dsh-ontology-studio/traces?limit=40` | 最近的工具调用轨迹（新→旧） |
 | `GET /dsh-ontology-studio/catalog` | 资产市场状态 |
+| `GET /dsh-ontology-studio/app-spec?id=` | 生成的应用页面规格 |
 | `GET /dsh-ontology-studio/records?id=<包id>&object=&limit=` | 事实数据的行数抽样 |
 | `GET /dsh-ontology-studio/history?id=&limit=40` | 资产包的变更历史（新→旧） |
 | `POST /dsh-ontology-studio/panel-report` | 面板上报自己的渲染健康状态（落到 .ontology-panel.jsonl） |
@@ -502,7 +535,7 @@ ontology_asset_catalog
 ## 测试
 
 ```bash
-npm test        # 十四组，共 219 项断言
+npm test        # 十五组，共 227 项断言
 ```
 
 | 文件 | 覆盖 |
@@ -514,6 +547,7 @@ npm test        # 十四组，共 219 项断言
 | `test/rules.test.cjs` | 19 项：表达式求值、语法拒绝代码注入、规则归属推导、违规行 |
 | `test/actions.test.cjs` | 24 项：入参校验、effect 声明校验、赋值与增量、跨对象调拨（数量守恒）、规则回验、审批拒绝不写盘 |
 | `test/export.test.cjs` | 9 项：类型映射、必填与主键、enum、money、、文档五节、动作可执行标记、工具不写盘 |
+| `test/app.test.cjs` | 12 项：每对象一页、数值右对齐、枚举 badge、筛选派生、表单来自 inputSchema、只有声明不生成表单、逐字稳定 |
 | `test/registry.test.cjs` | 12 项：catalog 状态、依赖缺失拒绝安装、重复安装、被依赖拒绝卸载、先卸依赖方、工具层贯通 |
 | `test/history.test.cjs` | 6 项：各类写入留痕、版本号跟随、失败不留痕、过滤与上限、关闭历史 |
 | `test/tools.test.cjs` | 21 项：激活、`ctx.effect` 挂载、十三个工具端到端、只读模式只剩七个读工具、上下文段落注册与关闭、缺少可选服务时照常工作、自检报告 |
@@ -562,7 +596,7 @@ dsh-ontology-studio/
 | Data Studio（同步型 / 联邦型并存、字段映射） | `DataPage` 读真实事实数据：行数、属性填充率；接入策略仍是设计说明 |
 | Logic & Action Studio（规则、函数、动作、审批闸门） | `LogicPage` 读真实 IR：规则表达式、动作审批标记、可执行性 |
 | Agent & Harness Studio（Ontology-aware 上下文与工具） | `AgentPage` + 六个 `ontology_*` 工具 |
-| App Studio（应用依赖本体而非表结构） | `AppPage`（骨架演示） |
+| App Studio（应用依赖本体而非表结构） | `AppPage` 读生成的页面规格并渲染预览 |
 | Governance Center（ID/版本/责任人/审核/审计） | `GovernancePage` 读真实变更历史；权限与审核仍是演示 |
 | Marketplace（三层资产、安装与复用） | `MarketplacePage` 读真实 catalog；依赖校验在工具层 |
 | Observability & Evaluation（Trace 与质量闭环） | `ObservabilityPage`（骨架演示） |
@@ -615,7 +649,7 @@ dsh-ontology-studio/
 - **审批需要有打开的 turn**：DSH 的审批请求必须被一个进行中的回合包住；在没有 turn 的上下文里调用会失败关闭（返回 `approval: 'unavailable'`）。
 - **并发控制是单进程内的**：etag CAS 挡住「读到旧版本再覆盖」，写锁挡住同进程内的交错写；多实例共享同一目录时仍没有分布式锁。
 - **单包单目录**：只扫 `assetsDir` 一层，无多租户与工作空间隔离。
-- **两个页面是骨架**：Agent & Harness、应用构建仍是演示数据（其余七页已接真实资产）。
+- **一个页面还是骨架**：Agent & Harness 需要 Agent 注册表（谁在用这个本体、评测指标），插件目前只知道工具被调用过。
 - **反向建模只吃表结构**：接口文档、样例报文、现有 SQL 还生成不了草稿。
 - **上下文是静态简报，不是按任务挑选**：每次装配注入的是整个资产包的摘要，还没有「这次任务只和 Inventory 有关」的裁剪。
 - **规则只跑在示例数据上**：`store-inventory.records.json` 是手写的事实数据，没有接真实 POS / 库存库；`ontology_evaluate_rules` 证明的是「规则能算」，不是「线上库存准」。

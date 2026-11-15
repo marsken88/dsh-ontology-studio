@@ -20,6 +20,7 @@ import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
+import { generateAppSpec } from './lib/app.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -139,6 +140,10 @@ export function apply(ctx, config = {}) {
       history,
       panel,
       catalog: () => catalogState({ catalogDir, assetsDir: store.dir }),
+      appSpec: async (id) => {
+        const { entry } = await store.get(id);
+        return entry && entry.ir ? generateAppSpec(entry.ir) : null;
+      },
       prefix: ROUTE_PREFIX,
       readOnly: writeMode === 'readonly',
       approval: approvalMode,
@@ -1097,6 +1102,59 @@ export function apply(ctx, config = {}) {
       const result = await uninstallAsset({ catalogDir, assetsDir: store.dir }, args.packageId);
       if (result.ok) await refreshBrief();
       return result;
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_generate_app  (read — metadata to page spec)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_generate_app',
+    description:
+      '从本体元数据生成页面规格：列表列、筛选器、详情字段、以及由动作 inputSchema 派生的操作表单。应用依赖 Ontology 定义而不是底层表结构，所以属性一变规格就跟着变。只生成规格，不产出代码、不写文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        objects: {
+          type: 'array',
+          description: '可选：只给这些对象生成页面（默认全部）',
+          items: { type: 'string' },
+        },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' }, spec: { type: 'object' }, message: { type: 'string' } },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`生成失败：${v.message || '未知原因'}`);
+        const s = v.spec;
+        const lines = [`${s.title} · 应用规格（${s.pageCount} 页，来自 ${s.generatedFrom.packageId} v${s.generatedFrom.version}）`];
+        for (const page of s.pages) {
+          lines.push(`\n${page.title}（${page.kind}）：${page.columns.length} 列，${page.filters.length} 个筛选器`);
+          lines.push('  列：' + page.columns.map((c) => c.label + (c.display === 'badge' ? '[枚举]' : '')).join(' / '));
+          if (page.filters.length) lines.push('  筛选：' + page.filters.map((f) => `${f.label}(${f.kind})`).join(' / '));
+          for (const action of page.actions) {
+            lines.push(
+              `  操作：${action.label}${action.approvalRequired ? '（需审批）' : ''} — 表单 ${action.form
+                .map((f) => f.field + (f.required ? '*' : ''))
+                .join(', ')}`
+            );
+          }
+        }
+        for (const note of s.notes || []) lines.push(`注意：${note}`);
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      return { ok: true, spec: generateAppSpec(entry.ir, { objects: args.objects }) };
     },
   });
 
