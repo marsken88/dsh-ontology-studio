@@ -30,7 +30,7 @@ import { focusOf, messageText } from './lib/focus.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.28.0';
+const CODE_VERSION = '0.29.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
