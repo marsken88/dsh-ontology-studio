@@ -1026,7 +1026,7 @@ window.__ModuleLoader__.load({
           null,
           model.live
             ? '数据来自宿主正在读取的本体资产包（' + (model.pkg ? model.pkg.id + ' v' + model.pkg.version : '—') + '），与 Agent 调用 ontology_* 工具看到的是同一份文件。写入路径已开放：Agent 可新增/替换对象并发布版本。'
-            : '当前显示的是内嵌演示数据：宿主 API 尚未连接（' + model.phase + '）。其余 Studio（数据接入、应用构建、治理、市场、可观测）仍是骨架演示。'
+            : '当前显示的是内嵌演示数据：宿主 API 尚未连接（' + model.phase + '）。如果刚升级过插件，先强制刷新一次页面（ctrl+shift+r）——浏览器会缓存旧的客户端包。'
         )
       );
     }
