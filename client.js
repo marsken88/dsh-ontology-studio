@@ -37,7 +37,8 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ *
      * styles — theme tokens only, so light/dark follow the host
      * ------------------------------------------------------------------ */
-    const CSS = `
+    const CSS = `.os-graph, .os-graph * { user-select: none; -webkit-user-select: none; }
+
 .os-root{display:flex;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
 .os-rail{flex:0 0 212px;min-width:0;display:flex;flex-direction:column;background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1)}
 .os-brand{display:flex;align-items:center;gap:9px;padding:14px 14px 8px}
