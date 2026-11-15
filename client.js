@@ -679,7 +679,7 @@ window.__ModuleLoader__.load({
     const STATUS_TEXT = { published: '已发布', draft: '草稿', deprecated: '已弃用' };
 
     function useOntologyState() {
-      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null, appSpec: null });
+      const [state, setState] = useState({ phase: 'loading', value: null, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null, appSpec: null, agents: null });
       useEffect(function () {
         let alive = true;
         const get = function (path) {
@@ -690,7 +690,7 @@ window.__ModuleLoader__.load({
           );
         };
         if (typeof fetch !== 'function') {
-          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null, history: [], catalog: null, appSpec: null });
+          setState({ phase: 'offline', value: null, file: null, ir: null, error: 'no fetch', traces: [], records: null, history: [], catalog: null, appSpec: null, agents: null });
           return function () {};
         }
         get('/status')
@@ -699,7 +699,7 @@ window.__ModuleLoader__.load({
             const value = body && body.value;
             const first = value && value.packages ? value.packages.filter(function (p) { return p.ok; })[0] : null;
             if (!first) {
-              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null, appSpec: null });
+              setState({ phase: 'empty', value: value, file: null, ir: null, error: null, traces: [], records: null, history: [], catalog: null, appSpec: null, agents: null });
               return null;
             }
             return get('/package?id=' + encodeURIComponent(first.id)).then(function (pkg) {
@@ -719,6 +719,9 @@ window.__ModuleLoader__.load({
                 get('/app-spec?id=' + encodeURIComponent(first.id)).catch(function () {
                   return { value: null };
                 }),
+                get('/agents?id=' + encodeURIComponent(first.id)).catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
@@ -726,6 +729,7 @@ window.__ModuleLoader__.load({
                 const historyEntries = (both[2] && both[2].value && both[2].value.entries) || [];
                 const catalog = (both[3] && both[3].value) || null;
                 const appSpec = (both[4] && both[4].value) || null;
+                const agents = (both[5] && both[5].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -737,13 +741,14 @@ window.__ModuleLoader__.load({
                   history: historyEntries,
                   catalog: catalog,
                   appSpec: appSpec,
+                  agents: agents,
                 });
               });
             });
           })
           .catch(function (error) {
             if (alive) {
-              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null, history: [], catalog: null, appSpec: null });
+              setState({ phase: 'offline', value: null, file: null, ir: null, error: String(error && error.message), traces: [], records: null, history: [], catalog: null, appSpec: null, agents: null });
             }
           });
         return function () {
@@ -831,6 +836,7 @@ window.__ModuleLoader__.load({
           history: state.history || [],
           catalog: state.catalog || null,
           appSpec: state.appSpec || null,
+          agents: state.agents || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -852,6 +858,7 @@ window.__ModuleLoader__.load({
         history: [],
         catalog: null,
         appSpec: null,
+        agents: null,
         dir: null,
         file: null,
         problems: [],
@@ -1507,7 +1514,102 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function AgentPage() {
+    function AgentLivePage(props) {
+      const model = props.model;
+      const roster = (model.agents && model.agents.agents) || [];
+      const usage = (model.agents && model.agents.usage) || { byTool: {} };
+      const callsOf = function (id) {
+        const per = usage.byTool && usage.byTool[id] ? usage.byTool[id] : {};
+        return Object.keys(per).reduce(function (n, tool) { return n + per[tool].ok + per[tool].fail; }, 0);
+      };
+      const published = roster.filter(function (a) { return a.status === 'published'; }).length;
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: String(roster.length), label: '声明 Agent', delta: published + ' 个已发布' }),
+          h(Stat, {
+            value: String(roster.filter(function (a) { return callsOf(a.id) > 0; }).length),
+            label: '轨迹里有调用的',
+            delta: usage.scanned + ' 条轨迹',
+          }),
+          h(Stat, { value: String(roster.reduce(function (n, a) { return n + ((a.tools || []).length); }, 0)), label: '绑定工具', delta: '声明总和' }),
+          h(Stat, { value: String(usage.unattributed || 0), label: '无法归属的调用', delta: '会话未在花名册里' })
+        ),
+        h(
+          Card,
+          { title: 'Agent 花名册', sub: '声明在本体包里；调用数据来自执行轨迹', extra: h(Badge, { tone: 'on' }, '声明 + 证据'), flush: true },
+          roster.length
+            ? h(Table, {
+                columns: [
+                  { key: 'name', label: 'Agent', render: function (r) { return h('span', { style: { fontWeight: 600 } }, r.name); } },
+                  {
+                    key: 'status',
+                    label: '状态',
+                    width: '10%',
+                    render: function (r) {
+                      const tone = r.status === 'published' ? 'on' : r.status === 'gray' ? 'warn' : '';
+                      return h(Badge, { tone: tone }, r.status || 'draft');
+                    },
+                  },
+                  { key: 'model', label: '模型', render: function (r) { return h('span', { className: 'os-mono os-muted' }, r.model || '—'); } },
+                  {
+                    key: 'usesObjects',
+                    label: '依赖对象',
+                    render: function (r) { return h('span', { className: 'os-mono' }, (r.usesObjects || []).join(', ') || '—'); },
+                  },
+                  {
+                    key: 'tools',
+                    label: '工具',
+                    render: function (r) { return h('span', { className: 'os-mono os-muted' }, (r.tools || []).join(', ') || '—'); },
+                  },
+                  {
+                    key: 'calls',
+                    label: '实际调用',
+                    width: '12%',
+                    render: function (r) {
+                      const n = callsOf(r.id);
+                      return h(Badge, { tone: n ? 'on' : '' }, n ? n + ' 次' : '无记录');
+                    },
+                  },
+                ],
+                rows: roster.map(function (a) { return Object.assign({ key: a.id }, a, { calls: callsOf(a.id) }); }),
+              })
+            : h('div', { className: 'os-card-b os-muted' }, '这个资产包还没有声明任何 Agent。')
+        ),
+        roster.length
+          ? h(
+              Card,
+              { title: '调用明细', sub: '每个 Agent 实际调用了哪些工具、成功几次', flush: true },
+              h(Table, {
+                columns: [
+                  { key: 'agent', label: 'Agent' },
+                  { key: 'tool', label: '工具', render: function (r) { return h('span', { className: 'os-mono' }, r.tool); } },
+                  { key: 'ok', label: '成功', width: '10%' },
+                  { key: 'fail', label: '失败', width: '10%' },
+                ],
+                rows: roster.flatMap(function (a) {
+                  const per = (usage.byTool && usage.byTool[a.id]) || {};
+                  return Object.keys(per).map(function (tool) {
+                    return { key: a.id + ':' + tool, agent: a.name, tool: tool, ok: per[tool].ok, fail: per[tool].fail };
+                  });
+                }),
+              })
+            )
+          : null,
+        h(
+          Notes,
+          null,
+          '花名册是声明，调用数据是证据——两列分开看：声明了但轨迹里没有，可能是还没上线；有调用但没声明，说明有人绕过花名册直接用了工具。'
+        )
+      );
+    }
+
+    function AgentPage(props) {
+      const model = (props && props.model) || buildModel({ phase: 'demo' });
+      if (model.live && model.agents && (model.agents.agents || []).length) return h(AgentLivePage, { model: model });
       return h(
         'div',
         { className: 'os-grid' },

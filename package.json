@@ -1,6 +1,6 @@
 {
   "name": "dsh-ontology-studio",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": true,
   "type": "module",
   "description": "Ontology Studio — enterprise semantic modeling and Harness execution platform shell inside the DeepSeek Harness Web GUI (8 studios, unified navigation, demo data).",
@@ -22,7 +22,7 @@
     "catalog"
   ],
   "scripts": {
-    "test": "node test/ir.test.cjs && node test/reverse.test.cjs && node test/app.test.cjs && node test/export.test.cjs && node test/context.test.cjs && node test/rules.test.cjs && node test/actions.test.cjs && node test/concurrency.test.cjs && node test/history.test.cjs && node test/registry.test.cjs && node test/tools.test.cjs && node test/write.test.cjs && node test/api.test.cjs && node test/e2e.test.cjs && node test/render-smoke.cjs"
+    "test": "node test/ir.test.cjs && node test/reverse.test.cjs && node test/app.test.cjs && node test/export.test.cjs && node test/context.test.cjs && node test/rules.test.cjs && node test/actions.test.cjs && node test/concurrency.test.cjs && node test/history.test.cjs && node test/registry.test.cjs && node test/agents.test.cjs && node test/tools.test.cjs && node test/write.test.cjs && node test/api.test.cjs && node test/e2e.test.cjs && node test/render-smoke.cjs"
   },
   "dsh": {
     "bundle": {

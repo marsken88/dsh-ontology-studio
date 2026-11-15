@@ -24,6 +24,11 @@
       "items": { "type": "string" },
       "description": "安装本包前必须已安装的其它资产包 id"
     },
+    "agents": {
+      "type": "array",
+      "description": "使用本资产包的 Agent 花名册（声明式；运行数据另从执行轨迹读取）",
+      "items": { "$ref": "#/$defs/agent" }
+    },
     "objects": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/object" } },
     "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
     "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
@@ -110,6 +115,24 @@
           ],
           "description": "一个或多个声明式副作用，按顺序应用"
         }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "description": "使用本包的 Agent 声明：它依赖哪些对象、Skill、工具，以及评测口径。运行数据不在 IR 里，由执行轨迹提供。",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "model": { "type": "string" },
+        "status": { "enum": ["published", "gray", "draft", "retired"] },
+        "usesObjects": { "type": "array", "items": { "type": "string" } },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "actions": { "type": "array", "items": { "type": "string" } },
+        "evalTarget": { "type": "string", "description": "评测口径，例如「补货准确率 ≥ 85%」" },
+        "owner": { "type": "string" }
       }
     },
     "effect": {

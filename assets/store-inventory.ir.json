@@ -153,5 +153,31 @@
     { "id": "policy.inventory.writeApproval", "name": "库存写操作必须人工审批", "appliesTo": ["adjustInventory", "createTransfer"], "effect": "require-approval" },
     { "id": "policy.crossRegion.transfer", "name": "跨区域调拨需大区经理确认", "appliesTo": ["createTransfer"], "effect": "require-approval" }
   ],
+  "agents": [
+    {
+      "id": "stock-replenisher",
+      "name": "库存补货 Agent",
+      "model": "deepseek-v4.1-flash",
+      "status": "published",
+      "owner": "供应链数字化组",
+      "usesObjects": ["Inventory", "Store", "Product"],
+      "skills": ["补货建议生成", "门店对比分析"],
+      "tools": ["ontology_get", "ontology_evaluate_rules", "ontology_execute_action"],
+      "actions": ["createReplenishment"],
+      "evalTarget": "补货准确率 ≥ 85%"
+    },
+    {
+      "id": "store-inspector",
+      "name": "巡店助手 Agent",
+      "model": "deepseek-v4.1-flash",
+      "status": "gray",
+      "owner": "门店运营组",
+      "usesObjects": ["Store", "Inventory"],
+      "skills": ["缺货巡检", "陈列检查"],
+      "tools": ["ontology_get", "ontology_records"],
+      "actions": ["adjustInventory"],
+      "evalTarget": "任务完成率 ≥ 90%"
+    }
+  ],
   "extensions": {}
 }

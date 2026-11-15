@@ -119,6 +119,13 @@ React.__setLive({
   file: '<assets>/store-inventory.ir.json',
   ir,
   error: null,
+  agents: {
+    agents: [
+      { id: 'stock-replenisher', name: '库存补货 Agent', model: 'deepseek-v4.1-flash', status: 'published', usesObjects: ['Inventory'], tools: ['ontology_get'], actions: [], evalTarget: '≥85%' },
+      { id: 'store-inspector', name: '巡店助手 Agent', model: 'deepseek-v4.1-flash', status: 'gray', usesObjects: ['Store'], tools: ['ontology_get'], actions: [], evalTarget: '≥90%' },
+    ],
+    usage: { byTool: { 'stock-replenisher': { ontology_get: { ok: 2, fail: 0 } } }, unattributed: 1, scanned: 3 },
+  },
   appSpec: {
     appId: ir.id + '.app',
     title: ir.name,
@@ -173,6 +180,7 @@ const expectations = {
   governance: ['变更历史', 'upsert_object', 'v1.1.0'],
   marketplace: ['资产市场', '会员权益资产包', '可安装'],
   app: ['页面清单', '操作表单', 'adjustInventory'],
+  agent: ['Agent 花名册', 'stock-replenisher', '2 次'],
 };
 for (const p of Object.keys(expectations)) {
   React.__setPage(p === 'overview' ? null : p);

@@ -140,6 +140,27 @@ export function apply(ctx, config = {}) {
       history,
       panel,
       catalog: () => catalogState({ catalogDir, assetsDir: store.dir }),
+      agents: async (id) => {
+        const { entry } = await store.get(id);
+        if (!entry || !entry.ir) return null;
+        const roster = entry.ir.agents || [];
+        const declared = new Set(roster.map((a) => a.id));
+        const entries = await trace.list(200);
+        const byTool = {};
+        let unattributed = 0;
+        for (const item of entries) {
+          const who = item.agent && declared.has(item.agent) ? item.agent : null;
+          if (!who) {
+            if (item.agent) unattributed += 1;
+            continue;
+          }
+          byTool[who] = byTool[who] || {};
+          byTool[who][item.tool] = byTool[who][item.tool] || { ok: 0, fail: 0 };
+          if (item.ok) byTool[who][item.tool].ok += 1;
+          else byTool[who][item.tool].fail += 1;
+        }
+        return { agents: roster, usage: { byTool, unattributed, scanned: entries.length } };
+      },
       appSpec: async (id) => {
         const { entry } = await store.get(id);
         return entry && entry.ir ? generateAppSpec(entry.ir) : null;
@@ -181,6 +202,7 @@ export function apply(ctx, config = {}) {
             ms: Date.now() - startedAt,
             summary: summarizeCall(definition.name, args),
             error,
+            agent: exec && exec.agent ? String(exec.agent.id) : null,
           });
           if (WRITE_TOOLS.has(definition.name)) void refreshBrief();
         }
@@ -1159,6 +1181,85 @@ export function apply(ctx, config = {}) {
   });
 
   /* ------------------------------------------------------------------ *
+   * ontology_agents  (read — declared roster + observed usage)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_agents',
+    description:
+      '查看使用本资产包的 Agent：花名册是本体包里声明的（依赖哪些对象/Skill/工具/动作、评测口径），运行数据来自执行轨迹（最近调用次数、成功率）。声明与证据分开，不把两者混成一个数。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        traceLimit: { type: 'number', description: '看最近多少条轨迹（默认 200）' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          agents: { type: 'array' },
+          usage: { type: 'object' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v.ok) return text(`读取失败：${v.message || '未知原因'}`);
+        if (!v.agents.length) return text('这个资产包还没有声明任何 Agent。');
+        const lines = ['Agent 花名册（声明）与实际调用（轨迹）：'];
+        for (const a of v.agents) {
+          const use = (v.usage.byTool || {})[a.id] || {};
+          const calls = Object.values(use).reduce((n, x) => n + x.ok + x.fail, 0);
+          lines.push(`\n${a.name}（${a.id}）· ${a.status || 'draft'}`);
+          if (a.model) lines.push(`  模型：${a.model}`);
+          if (a.usesObjects && a.usesObjects.length) lines.push(`  依赖对象：${a.usesObjects.join(', ')}`);
+          if (a.tools && a.tools.length) lines.push(`  工具：${a.tools.join(', ')}`);
+          if (a.actions && a.actions.length) lines.push(`  动作：${a.actions.join(', ')}`);
+          if (a.evalTarget) lines.push(`  评测口径：${a.evalTarget}`);
+          lines.push(
+            `  实际调用：${calls ? Object.entries(use).map(([t, s]) => t + ' ' + (s.ok + s.fail) + ' 次').join('；') : '轨迹里没有这个 Agent 的调用'}`
+          );
+        }
+        if (v.usage.unattributed) {
+          lines.push(`\n轨迹中无法归属到声明 Agent 的调用：${v.usage.unattributed} 次`);
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    execute: async (args) => {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      const agents = entry.ir.agents || [];
+      const declared = new Set(agents.map((a) => a.id));
+
+      const limit = Math.max(1, Math.min(Number.isFinite(args.traceLimit) ? args.traceLimit : 200, 500));
+      const entries = await trace.list(limit);
+      const byTool = {};
+      let unattributed = 0;
+      for (const item of entries) {
+        const who = item.agent && declared.has(item.agent) ? item.agent : null;
+        if (!who) {
+          if (item.agent) unattributed += 1;
+          continue;
+        }
+        byTool[who] = byTool[who] || {};
+        byTool[who][item.tool] = byTool[who][item.tool] || { ok: 0, fail: 0 };
+        if (item.ok) byTool[who][item.tool].ok += 1;
+        else byTool[who][item.tool].fail += 1;
+      }
+      return {
+        ok: true,
+        agents,
+        usage: { byTool, unattributed, scanned: entries.length, traceFile: trace.file },
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
    * ontology_upsert_object  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
@@ -1632,6 +1733,21 @@ export function apply(ctx, config = {}) {
           return Object.assign({}, p, { appliesTo });
         })
         .filter((p) => !Array.isArray(p.appliesTo) || p.appliesTo.length > 0);
+
+      // Agents reference objects and actions too; leaving them dangling would
+      // make the package invalid, so the cascade trims those references as well.
+      const trimmedAgents = [];
+      if (Array.isArray(ir.agents)) {
+        ir.agents = ir.agents.map((agent) => {
+          const usesObjects = (agent.usesObjects || []).filter((id) => id !== args.objectId);
+          const actions = (agent.actions || []).filter((id) => droppedActions.indexOf(id) < 0);
+          const objectsChanged = usesObjects.length !== (agent.usesObjects || []).length;
+          const actionsChanged = actions.length !== (agent.actions || []).length;
+          if (!objectsChanged && !actionsChanged) return agent;
+          trimmedAgents.push(agent.id);
+          return Object.assign({}, agent, { usesObjects, actions });
+        });
+      }
 
       const check = validateIr(ir);
       if (!check.ok) {

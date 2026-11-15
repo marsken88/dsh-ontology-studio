@@ -392,6 +392,8 @@ function readPackage(dir) {
     }
     const validated = await tools.ontology_validate.execute({}, {});
     assert.equal(validated.ok, true, JSON.stringify(validated.problems));
+    // Agent 花名册里对 Inventory 的引用也应被摘掉，否则整包会失效
+    assert.ok(!saved.agents.some((a) => (a.usesObjects || []).includes('Inventory')), 'agent 仍引用已删除对象');
   });
 
   await it('cascade + dryRun 只预览不落盘', async () => {
