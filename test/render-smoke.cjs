@@ -10,6 +10,16 @@ const vm = require('vm');
 const SRC = path.join(__dirname, '..', 'client.js');
 const source = fs.readFileSync(SRC, 'utf8');
 
+class Component {
+  constructor(props) {
+    this.props = props || {};
+    this.state = {};
+  }
+  setState(patch) {
+    this.state = Object.assign({}, this.state, typeof patch === 'function' ? patch(this.state) : patch);
+  }
+}
+
 function makeReact(pageOverride) {
   let hookIndex = 0;
   let forcedPage = null;
@@ -19,6 +29,10 @@ function makeReact(pageOverride) {
     /** Feed the panel a resolved Host state so the live model path renders too. */
     __setLive(state) { liveState = state; },
     createElement(type, props, ...children) {
+      if (typeof type === 'function' && type.prototype && type.prototype.render) {
+        const instance = new type(Object.assign({}, props, { children }));
+        return instance.render();
+      }
       if (typeof type === 'function') {
         // expand function components so their bodies execute
         return type(Object.assign({}, props, { children }));
@@ -35,6 +49,7 @@ function makeReact(pageOverride) {
       return [init, () => {}];
     },
     useMemo(fn) { return fn(); },
+    Component: Component,
     /** Effects never run here: the panel must render its fallback data on a cold start. */
     useEffect() { return undefined; },
   };
@@ -141,5 +156,23 @@ for (const p of Object.keys(expectations)) {
   console.log('live  :', p.padEnd(14), 'ok', (json.length / 1024).toFixed(1) + 'KB tree');
 }
 React.__setLive(null);
+
+React.__setLive({
+  phase: 'live',
+  value: { dir: '<assets>', missingDir: false, packages: [{ id: ir.id, ok: true }], problems: [] },
+  file: '<assets>/store-inventory.ir.json',
+  ir,
+  error: null,
+  traces: [],
+  records: null,
+  history: [],
+});
+React.__setPage('observability');
+{
+  const emptyJson = JSON.stringify(panel({}));
+  if (!emptyJson.includes('还没有任何工具调用记录')) throw new Error('live 但零轨迹时应显示空状态');
+  if (emptyJson.includes('补货准确率')) throw new Error('live 时不应再渲染演示轨迹');
+  console.log('live  : observability(空) ok');
+}
 
 console.log('\nall render smoke checks passed');

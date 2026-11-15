@@ -1108,7 +1108,7 @@ window.__ModuleLoader__.load({
      * which properties the fact data actually fills in, and which it never has.
      */
     function coverageOf(object, sampleRows) {
-      const props = (object && object.properties) || [];
+      const props = (object && (object.props || object.properties)) || [];
       const rows = sampleRows || [];
       return props.map(function (p) {
         const present = rows.filter(function (row) {
@@ -1747,8 +1747,8 @@ window.__ModuleLoader__.load({
     /** Live trace list when the Host is recording; demo detail view otherwise. */
     function ObservabilityPage(props) {
       const model = props.model || buildModel({ phase: 'demo' });
-      const live = model.live && model.traces && model.traces.length ? model.traces : null;
-      if (!live) return h(ObservabilityDemo, props);
+      if (!model.live) return h(ObservabilityDemo, props);
+      const live = model.traces || [];
       const okCount = live.filter(function (e) { return e.ok; }).length;
       return h(
         'div',
@@ -1759,16 +1759,18 @@ window.__ModuleLoader__.load({
           h(Stat, { value: String(live.length), label: '已记录调用', delta: '来自执行轨迹' }),
           h(Stat, { value: String(okCount), label: '成功', delta: live.length - okCount + ' 次失败' }),
           h(Stat, {
-            value: String(Math.round(live.reduce(function (n, e) { return n + (e.ms || 0); }, 0) / live.length)) + 'ms',
+            value: live.length ? Math.round(live.reduce(function (n, e) { return n + (e.ms || 0); }, 0) / live.length) + 'ms' : '—',
             label: '平均耗时',
             delta: 'P50 近似',
           }),
-          h(Stat, { value: String(model.actions), label: '可执行动作', delta: '本体声明' })
+          h(Stat, { value: String((model.pkg && (model.pkg.actions || []).filter(function (a) { return a.effect && Array.isArray(a.inputSchema) && a.inputSchema.length; }).length) || 0), label: '可执行动作', delta: model.actions + ' 个本体动作' })
         ),
         h(
           Card,
           { title: '执行轨迹（实时）', sub: model.dir, extra: h(Badge, { tone: 'on' }, '真实记录') },
-          h(
+          live.length === 0
+            ? h('div', { className: 'os-card-b os-muted' }, '这个实例还没有任何工具调用记录。调用一次 ontology_* 工具后刷新即可看到真实轨迹。')
+            : h(
             'div',
             { style: { margin: '0 -14px' } },
             h(Table, {
@@ -2017,7 +2019,7 @@ window.__ModuleLoader__.load({
               )
             )
           ),
-          h('div', { className: 'os-rail-foot' }, model.live ? 'v0.3 · 已连接宿主资产' : 'v0.3 · ' + model.label)
+          h('div', { className: 'os-rail-foot' }, model.live ? '已连接宿主资产' : model.label)
         ),
         h(
           'div',
