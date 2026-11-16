@@ -20,6 +20,7 @@ import { validateInput, applyEffects, executableActions, policiesFor } from './l
 import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
+import { generateOpenApi } from './lib/openapi.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -33,7 +34,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.41.2';
+const CODE_VERSION = '0.42.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1141,7 +1142,7 @@ export function apply(ctx, config = {}) {
       type: 'object',
       properties: {
         packageId: { type: 'string' },
-        format: { type: 'string', description: 'json-schema（默认）| markdown' },
+        format: { type: 'string', description: 'json-schema（默认）| markdown | openapi' },
         objectId: { type: 'string', description: 'json-schema 时可只导出一个对象' },
       },
       required: ['packageId'],
@@ -1167,7 +1168,14 @@ export function apply(ctx, config = {}) {
       const { entry } = await store.get(args.packageId);
       if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
       const ir = entry.ir;
-      const format = args.format === 'markdown' ? 'markdown' : 'json-schema';
+      const format =
+        args.format === 'markdown' ? 'markdown' : args.format === 'openapi' ? 'openapi' : 'json-schema';
+
+      if (format === 'openapi') {
+        const doc = generateOpenApi(entry.ir);
+        const text2 = JSON.stringify(doc, null, 2);
+        return { ok: true, format: 'openapi', packageId: entry.ir.id, chars: text2.length, pathCount: Object.keys(doc.paths).length, schemaCount: Object.keys(doc.components.schemas).length, notes: doc.notes, content: text2 };
+      }
 
       if (format === 'markdown') {
         if (args.objectId) {

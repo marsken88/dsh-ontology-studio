@@ -1,6 +1,6 @@
 {
   "name": "dsh-ontology-studio",
-  "version": "0.41.2",
+  "version": "0.42.0",
   "private": true,
   "type": "module",
   "description": "Ontology Studio for DeepSeek Harness: model business objects as IR, validate them, evaluate rules, execute declarative actions behind an approval gate, install/upgrade packages, and drive it all from an Agent or a panel.",
