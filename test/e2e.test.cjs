@@ -58,7 +58,7 @@ async function it(name, fn) {
     assert.equal(value.ok, true, JSON.stringify(value.checks));
     assert.match(value.version, /^\d+\.\d+\.\d+$/);
     assert.equal(value.config.writeMode, 'open');
-    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('34 个'));
+    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('35 个'));
   });
 
   await it('资产包与事实数据都能读到，且行数一致', async () => {

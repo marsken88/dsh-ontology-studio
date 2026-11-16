@@ -465,6 +465,21 @@ async function call(route, url, method = 'GET', body) {
     assert.equal(value.summary.topFailing[0].tool, 'ontology_get');
   });
 
+  console.log("\nGET /metrics");
+
+  await it('按声明算指标，并说清多少行参与', async () => {
+    const res = await call(routes[0], `${PREFIX}/metrics?id=retail.store-inventory`);
+    assert.equal(res.statusCode, 200);
+    const value = res.json().value;
+    assert.equal(value.metrics.length, 3);
+    const stockout = value.metrics.find((m) => m.id === 'inventory.stockoutCount');
+    assert.equal(stockout.value, 1);
+    assert.equal(stockout.matched, 1);
+    assert.equal(stockout.total, 5);
+    const total = value.metrics.find((m) => m.id === 'inventory.availableTotal');
+    assert.equal(total.value, 653);
+  });
+
   const total = pass + failures.length;
   console.log(`\n${pass}/${total} passed`);
   if (failures.length) {

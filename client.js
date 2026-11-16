@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.56.2';
+    const CLIENT_VERSION = '0.57.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -770,6 +770,9 @@ select.os-input{padding-right:4px}
                 get('/views?id=' + encodeURIComponent(first.id)).catch(function () {
                   return { value: null };
                 }),
+                get('/metrics?id=' + encodeURIComponent(first.id)).catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
@@ -782,6 +785,7 @@ select.os-input{padding-right:4px}
                 const agents = (both[6] && both[6].value) || null;
                 const sync = (both[7] && both[7].value) || null;
                 const views = (both[8] && both[8].value) || null;
+                const metrics = (both[9] && both[9].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -798,6 +802,7 @@ select.os-input{padding-right:4px}
                   agents: agents,
                   sync: sync,
                   views: views,
+                  metrics: metrics,
                 });
               });
             });
@@ -904,6 +909,7 @@ select.os-input{padding-right:4px}
           agents: state.agents || null,
           sync: state.sync || null,
           views: state.views || null,
+          metrics: state.metrics || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -2852,6 +2858,49 @@ select.os-input{padding-right:4px}
           });
       };
       const enabledRules = data.rules.filter(function (r) { return r.enabled; }).length;
+      const metricRows = (model.metrics && model.metrics.metrics) || [];
+      const metricsCard = metricRows.length
+        ? h(
+            Card,
+            {
+              title: '指标口径',
+              sub: '声明式口径 + 在事实数据上真算；「0 行参与」与「结果 0」分开显示',
+              extra: h(Badge, { tone: 'on' }, metricRows.length + ' 个'),
+              flush: true,
+            },
+            h(Table, {
+              columns: [
+                { key: 'id', label: '指标', width: '26%', render: function (r) { return h('span', { className: 'os-mono' }, r.id); } },
+                { key: 'name', label: '名称', width: '18%' },
+                {
+                  key: 'formula',
+                  label: '口径',
+                  width: '26%',
+                  render: function (r) {
+                    const agg = { count: '计数', sum: '求和', avg: '均值', min: '最小', max: '最大' }[r.aggregation] || r.aggregation;
+                    return h('span', { className: 'os-muted' }, (r.field ? r.object + '.' + r.field : r.object) + ' ' + agg + (r.filter ? '，仅 ' + r.filter : ''));
+                  },
+                },
+                {
+                  key: 'value',
+                  label: '值',
+                  width: '12%',
+                  render: function (r) {
+                    if (r.problems && r.problems.length) return h(Badge, { tone: 'err' }, '算不了');
+                    return h('span', { className: 'os-mono', style: { fontWeight: 600 } }, r.value === null ? '—' : String(r.value));
+                  },
+                },
+                {
+                  key: 'matched',
+                  label: '参与行数',
+                  width: '14%',
+                  render: function (r) { return h('span', { className: 'os-mono os-muted' }, r.matched + '/' + r.total); },
+                },
+              ],
+              rows: metricRows.map(function (m) { return Object.assign({ key: m.id }, m); }),
+            })
+          )
+        : null;
       const execActions = data.actions.filter(function (a) { return a.executable; }).length;
       return h(
         'div',
@@ -2872,6 +2921,7 @@ select.os-input{padding-right:4px}
             delta: '缺 inputSchema 或 effect',
           })
         ),
+        metricsCard,
         editing && packageId
           ? h(RuleEditor, {
               packageId: packageId,

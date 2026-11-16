@@ -1,6 +1,6 @@
 {
   "name": "dsh-ontology-studio",
-  "version": "0.56.2",
+  "version": "0.57.0",
   "private": true,
   "type": "module",
   "description": "Ontology Studio for DeepSeek Harness: model business objects as IR, validate them, evaluate rules, execute declarative actions behind an approval gate, install/upgrade packages, and drive it all from an Agent or a panel.",
@@ -22,7 +22,7 @@
     "catalog"
   ],
   "scripts": {
-    "test": "node test/ir.test.cjs && node test/reverse.test.cjs && node test/sample.test.cjs && node test/focus.test.cjs && node test/focus-wire.test.cjs && node test/harness.test.cjs && node test/evals.test.cjs && node test/robust.test.cjs && node test/durability.test.cjs && node test/router.test.cjs && node test/panel-writes.test.cjs && node test/app.test.cjs && node test/export.test.cjs && node test/diff.test.cjs && node test/context.test.cjs && node test/lint.test.cjs && node test/rules.test.cjs && node test/actions.test.cjs && node test/concurrency.test.cjs && node test/history.test.cjs && node test/registry.test.cjs && node test/agents.test.cjs && node test/tools.test.cjs && node test/write.test.cjs && node test/api.test.cjs && node test/e2e.test.cjs && node test/render-smoke.cjs && node scripts/audit-docs.cjs && node scripts/audit-css.cjs && node scripts/audit-wiring.cjs && node test/observability.test.cjs && node test/views.test.cjs && node test/views-tool.test.cjs && node test/sync-tool.test.cjs && node test/sync.test.cjs && node test/datasource.test.cjs",
+    "test": "node test/ir.test.cjs && node test/reverse.test.cjs && node test/sample.test.cjs && node test/focus.test.cjs && node test/focus-wire.test.cjs && node test/harness.test.cjs && node test/evals.test.cjs && node test/robust.test.cjs && node test/durability.test.cjs && node test/router.test.cjs && node test/panel-writes.test.cjs && node test/app.test.cjs && node test/export.test.cjs && node test/diff.test.cjs && node test/context.test.cjs && node test/lint.test.cjs && node test/rules.test.cjs && node test/actions.test.cjs && node test/concurrency.test.cjs && node test/history.test.cjs && node test/registry.test.cjs && node test/agents.test.cjs && node test/tools.test.cjs && node test/write.test.cjs && node test/api.test.cjs && node test/e2e.test.cjs && node test/render-smoke.cjs && node scripts/audit-docs.cjs && node scripts/audit-css.cjs && node scripts/audit-wiring.cjs && node test/metrics.test.cjs && node test/observability.test.cjs && node test/views.test.cjs && node test/views-tool.test.cjs && node test/sync-tool.test.cjs && node test/sync.test.cjs && node test/datasource.test.cjs",
     "audit:docs": "node scripts/audit-docs.cjs"
   },
   "dsh": {

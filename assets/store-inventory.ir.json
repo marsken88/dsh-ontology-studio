@@ -628,5 +628,29 @@
         }
       ]
     }
+  ],
+  "metrics": [
+    {
+      "id": "inventory.stockoutCount",
+      "name": "缺货记录数",
+      "description": "可售数量小于等于 0 的库存行",
+      "object": "Inventory",
+      "aggregation": "count",
+      "filter": "availableQty <= 0"
+    },
+    {
+      "id": "inventory.availableTotal",
+      "name": "可售总量",
+      "object": "Inventory",
+      "aggregation": "sum",
+      "field": "availableQty"
+    },
+    {
+      "id": "product.shelfLifeAvg",
+      "name": "平均保质期（天）",
+      "object": "Product",
+      "aggregation": "avg",
+      "field": "shelfLifeDays"
+    }
   ]
 }

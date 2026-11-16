@@ -24,6 +24,7 @@ import { generateOpenApi } from './lib/openapi.mjs';
 import { draftFromCsvFile, packageFromDraft } from './lib/datasource.mjs';
 import { nextSyncState, syncFileName, describeSync } from './lib/sync.mjs';
 import { projectPackage, viewCoverage, describeView, viewsOf, trimViewsAfterObjectDelete } from './lib/views.mjs';
+import { computeMetrics, describeResult, trimMetricsAfterObjectDelete } from './lib/metrics.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -37,7 +38,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.56.2';
+const CODE_VERSION = '0.57.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -2286,6 +2287,83 @@ export function apply(ctx, config = {}) {
   });
 
   /* ------------------------------------------------------------------ *
+   * ontology_metrics  (read — 在事实数据上算声明的指标)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_metrics',
+    description:
+      '在事实数据上计算资产包里声明的指标口径（count/sum/avg/min/max，可带过滤表达式）。返回每个指标的值与「多少行参与计算」——0 行参与和结果是 0 是两件事。只读，不写盘。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        metricId: { type: 'string', description: '可选：只算这一个指标' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          count: { type: 'number' },
+          metrics: { type: 'array' },
+          recordsFile: { type: 'string' },
+          summary: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok === false) return text('未能计算指标：' + (v.message || '未知原因'));
+        if (!v.count) return text('这个包还没有声明指标。用 v.metrics 的声明格式在 IR 里加一条即可。');
+        const lines = [`${v.count} 个指标（数据源 ${v.recordsFile}）`];
+        for (const m of v.metrics) {
+          if (m.problems && m.problems.length) {
+            lines.push(`· ${m.id} 算不了：${m.problems[0].message}`);
+          } else {
+            lines.push(`· ${m.id} = ${m.value === null ? '—' : m.value}（${m.matched}/${m.total} 行参与计算）`);
+          }
+        }
+        return text(lines.join('\n'));
+      },
+    },
+    async execute(args) {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` }; 
+
+      const declared = Array.isArray(entry.ir.metrics) ? entry.ir.metrics : [];
+      if (!declared.length) {
+        return { ok: true, count: 0, metrics: [], recordsFile: '', summary: '没有声明指标' };
+      }
+      if (args.metricId && !declared.some((m) => m.id === args.metricId)) {
+        return {
+          ok: false,
+          message: `指标不存在：${args.metricId}。已声明：${declared.map((m) => m.id).join('、')}`,
+        };
+      }
+
+      const loaded = await loadRecords(entry.file);
+      if (!loaded.records) {
+        return { ok: false, message: loaded.problems.join('；') };
+      }
+
+      const list = computeMetrics(entry.ir, loaded.records).filter(
+        (m) => !args.metricId || m.id === args.metricId
+      );
+      return {
+        ok: true,
+        count: list.length,
+        metrics: list,
+        recordsFile: loaded.file,
+        summary: list.map((m) => describeResult(m)).join('；'),
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
    * ontology_draft_from_csv  (read — 读 CSV 推断对象草稿)
    * ------------------------------------------------------------------ */
   register({
@@ -2988,6 +3066,7 @@ export function apply(ctx, config = {}) {
 
       // 视图也引用对象与属性：不清理的话，级联删除会把包弄成不合法
       const trimmedViews = trimViewsAfterObjectDelete(ir, args.objectId);
+      const droppedMetrics = trimMetricsAfterObjectDelete(ir, args.objectId);
 
       const check = validateIr(ir);
       if (!check.ok) {
@@ -2998,6 +3077,7 @@ export function apply(ctx, config = {}) {
         actions: droppedActions.length,
         policies: trimmedPolicies.length,
         views: trimmedViews.length,
+        metrics: droppedMetrics.length,
       };
       if (args.dryRun) {
         return { ok: true, objectId: args.objectId, version: ir.version, cascaded, message: 'dryRun：未写盘' };

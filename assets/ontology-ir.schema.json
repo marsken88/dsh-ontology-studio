@@ -101,6 +101,13 @@
       "items": {
         "$ref": "#/$defs/view"
       }
+    },
+    "metrics": {
+      "type": "array",
+      "description": "指标口径：声明在事实数据上怎么算一个数（聚合 + 可选过滤表达式），由 ontology_metrics 真算。",
+      "items": {
+        "$ref": "#/$defs/metric"
+      }
     }
   },
   "$defs": {
@@ -517,6 +524,48 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "description": "一个指标：对某个对象做聚合，可带过滤表达式。",
+      "required": [
+        "id",
+        "name",
+        "object",
+        "aggregation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*(\\.[A-Za-z0-9]+)+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "object": {
+          "type": "string"
+        },
+        "aggregation": {
+          "enum": [
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max"
+          ]
+        },
+        "field": {
+          "type": "string"
+        },
+        "filter": {
+          "type": "string"
         }
       }
     }

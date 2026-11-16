@@ -237,6 +237,7 @@ const EXEC = { agent: { id: 'test-agent' }, callId: 'call-1' };
     );
     assert.equal(value.ok, true, JSON.stringify(value.problems || []));
     assert.equal(value.cascaded.views, 1, '应报告清理了 1 个视图');
+    assert.ok(value.cascaded.metrics >= 0, '应报告清理了多少指标');
     const ir = JSON.parse(fs.readFileSync(path.join(assetsDir, 'store-inventory.ir.json'), 'utf8'));
     const view2 = (ir.views || [])[0];
     assert.equal(ir.views.length, 1);
@@ -253,6 +254,23 @@ const EXEC = { agent: { id: 'test-agent' }, callId: 'call-1' };
     assert.deepEqual(ir.views || [], [], '空视图等于一个永远报错的视角，应当删掉');
   });
 
+  await it('级联删对象会连带删掉指向它的指标', async () => {
+    const { ctx: c4, registered: r4 } = fakeContext({ request: async () => 'allowed-once' });
+    const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'onto-metrics-cascade-'));
+    const a4 = path.join(d4, 'assets');
+    fs.mkdirSync(a4, { recursive: true });
+    const seed = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), 'utf8'));
+    seed.metrics = [{ id: 'inventory.probe', name: '探针', object: 'Inventory', aggregation: 'count' }];
+    fs.writeFileSync(path.join(a4, 'store-inventory.ir.json'), JSON.stringify(seed, null, 2));
+    mod.apply(c4, { assetsDir: a4, trace: false, history: false });
+    const by = Object.fromEntries(r4.map((d) => [d.name, d]));
+    const out = await by.ontology_delete_object.execute({ packageId: PKG, objectId: 'Inventory', cascade: true }, EXEC);
+    assert.equal(out.ok, true, JSON.stringify(out.problems || []));
+    assert.equal(out.cascaded.metrics, 1);
+    const ir = JSON.parse(fs.readFileSync(path.join(a4, 'store-inventory.ir.json'), 'utf8'));
+    assert.deepEqual((ir.metrics || []).map((m) => m.object).filter((o) => o === 'Inventory'), []);
+    fs.rmSync(d4, { recursive: true, force: true });
+  });
   fs.rmSync(dir, { recursive: true, force: true });
 
   const total = pass + failures.length;
