@@ -64,7 +64,7 @@ window.__ModuleLoader__.load({
 .os-g2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .os-g3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .os-g4{grid-template-columns:repeat(4,minmax(0,1fr))}
-.os-split{display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px;align-items:start}
+.os-split{display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px;align-items:stretch}
 .os-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
 .os-card-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .os-card-t{flex:1;min-width:0;font-size:12px;font-weight:600}
@@ -1753,7 +1753,7 @@ window.__ModuleLoader__.load({
         },
         h(
           'div',
-          { className: 'os-graph', style: { overflow: 'auto', maxHeight: '70vh', background: 'transparent', userSelect: 'none', WebkitUserSelect: 'none' } },
+          { className: 'os-graph', style: { display: 'flex', justifyContent: 'center', overflow: 'auto', maxHeight: '70vh', background: 'transparent', userSelect: 'none', WebkitUserSelect: 'none' } },
           h(
             'svg',
             {
@@ -2599,9 +2599,27 @@ window.__ModuleLoader__.load({
             setBusy(false);
           });
       };
+      const enabledRules = data.rules.filter(function (r) { return r.enabled; }).length;
+      const execActions = data.actions.filter(function (a) { return a.executable; }).length;
       return h(
         'div',
         { className: 'os-grid' },
+        h(
+          'div',
+          { className: 'os-grid os-g4' },
+          h(Stat, { value: String(data.rules.length), label: '业务规则', delta: enabledRules + ' 条启用' }),
+          h(Stat, { value: String(data.actions.length), label: '业务动作', delta: execActions + ' 个可执行' }),
+          h(Stat, {
+            value: String(data.actions.filter(function (a) { return a.approvalRequired; }).length),
+            label: '需审批',
+            delta: '写操作走闸门',
+          }),
+          h(Stat, {
+            value: String(data.actions.filter(function (a) { return !a.executable; }).length),
+            label: '仅声明',
+            delta: '缺 inputSchema 或 effect',
+          })
+        ),
         editing && packageId
           ? h(RuleEditor, {
               packageId: packageId,
