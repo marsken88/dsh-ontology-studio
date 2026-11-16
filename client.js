@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.48.0';
+    const CLIENT_VERSION = '0.48.1';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3892,8 +3892,24 @@ select.os-input{padding-right:4px}
                 className: 'os-btn',
                 title: '开一个新会话。新会话按默认权限预设创建，审批会被询问',
                 onClick: function () {
-                  if (panelCtx && panelCtx.uiWorkspace && typeof panelCtx.uiWorkspace.startSession === 'function') {
-                    panelCtx.uiWorkspace.startSession();
+                  const pick = function () {
+                    if (!panelCtx) return null;
+                    if (panelCtx.uiWorkspace && typeof panelCtx.uiWorkspace.startSession === 'function') return panelCtx.uiWorkspace;
+                    if (typeof panelCtx.get === 'function') {
+                      const svc = panelCtx.get('uiWorkspace');
+                      if (svc && typeof svc.startSession === 'function') return svc;
+                    }
+                    return null;
+                  };
+                  const svc = pick();
+                  if (!svc) {
+                    window.alert('这个客户端版本拿不到开新会话的能力。请点左侧栏的「+ 新会话」手动开一个。');
+                    return;
+                  }
+                  try {
+                    svc.startSession();
+                  } catch (err) {
+                    window.alert('开新会话失败：' + (err && err.message ? err.message : String(err)));
                   }
                 },
               },
