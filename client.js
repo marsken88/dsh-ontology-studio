@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.37.2';
+    const CLIENT_VERSION = '0.37.3';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -84,7 +84,6 @@ window.__ModuleLoader__.load({
   color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}
 .os-input:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}
 select.os-input{padding-right:4px}
-.os-li{display:flex;align-items:center;gap:8px}
 .os-flush{padding:0}
 .os-kpi{font-size:22px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
 .os-kpi-l{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:1px}
@@ -108,7 +107,7 @@ select.os-input{padding-right:4px}
 .os-tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}
 .os-tab{border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;padding:9px 10px;margin-bottom:-1px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
 .os-tab.on{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-brand-primary);font-weight:600}
-.os-li{display:block;width:100%;text-align:left;padding:8px 12px;border:0;border-left:2px solid transparent;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.os-li{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 12px;border:0;border-left:2px solid transparent;background:transparent;color:inherit;font:inherit;cursor:pointer}
 .os-li:hover{background:var(--dsw-alias-bg-layer-2)}
 .os-li.on{background:var(--dsw-alias-bg-layer-2);border-left-color:var(--dsw-alias-brand-primary)}
 .os-li-t{font-size:12px;font-weight:600}
