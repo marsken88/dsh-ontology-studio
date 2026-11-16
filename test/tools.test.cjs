@@ -94,13 +94,14 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects, sections, listeners } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册全部三十二个工具', () => {
+  await it('apply 不抛错并注册全部三十四个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_agents',
       'ontology_asset_catalog',
       'ontology_delete_link',
       'ontology_delete_object',
+      'ontology_delete_view',
       'ontology_diagnostics',
       'ontology_diff',
       'ontology_draft_from_csv',
@@ -128,6 +129,7 @@ function fakeContext(options = {}) {
       'ontology_upgrade',
       'ontology_upsert_link',
       'ontology_upsert_object',
+      'ontology_upsert_view',
       'ontology_validate',
     ]);
   });
@@ -194,13 +196,13 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 32, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 34, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 32);
+    assert.equal(alt.registered.length, 34);
   });
 
   await it('客户端版本常量与 package.json 一致', () => {

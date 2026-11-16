@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.54.0';
+    const CLIENT_VERSION = '0.55.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -767,6 +767,9 @@ select.os-input{padding-right:4px}
                 get('/sync').catch(function () {
                   return { value: null };
                 }),
+                get('/views?id=' + encodeURIComponent(first.id)).catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
@@ -777,6 +780,7 @@ select.os-input{padding-right:4px}
                 const harness = (both[5] && both[5].value) || null;
                 const agents = (both[6] && both[6].value) || null;
                 const sync = (both[7] && both[7].value) || null;
+                const views = (both[8] && both[8].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -791,6 +795,7 @@ select.os-input{padding-right:4px}
                   harness: harness,
                   agents: agents,
                   sync: sync,
+                  views: views,
                 });
               });
             });
@@ -895,6 +900,7 @@ select.os-input{padding-right:4px}
           harness: state.harness || null,
           agents: state.agents || null,
           sync: state.sync || null,
+          views: state.views || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -3371,6 +3377,57 @@ select.os-input{padding-right:4px}
       });
       const hc = model.harness || null;
       const gaps = (hc && hc.gaps) || [];
+      const viewData = model.views || null;
+      const viewList = (viewData && viewData.views) || [];
+      const totalProps = (viewData && viewData.total && viewData.total.properties) || 0;
+      const totalObjects = (viewData && viewData.total && viewData.total.objects) || (pkg.objects || []).length;
+      const viewsCard = h(
+        Card,
+        {
+          title: '角色视角（视图）',
+          sub: viewList.length
+            ? viewList.length + ' 个视图，覆盖 ' + totalObjects + ' 个对象中的一部分'
+            : '还没有声明视图',
+          extra: viewList.length
+            ? h(Badge, { tone: 'on' }, '可校验声明')
+            : h(Badge, { tone: 'warn' }, '未声明'),
+          flush: viewList.length > 0,
+        },
+        viewList.length
+          ? h(Table, {
+              columns: [
+                { key: 'id', label: '视图', width: '18%', render: function (r) { return h('span', { className: 'os-mono' }, r.id); } },
+                { key: 'name', label: '名称', width: '18%' },
+                {
+                  key: 'objects',
+                  label: '可见对象',
+                  width: '30%',
+                  render: function (r) {
+                    return (r.coverage || [])
+                      .map(function (c) {
+                        return c.objectId + ' ' + c.covered.length + '/' + c.total;
+                      })
+                      .join('，');
+                  },
+                },
+                { key: 'summary', label: '说明' },
+              ],
+              rows: viewList.map(function (v) {
+                return { key: v.id, id: v.id, name: v.name, coverage: v.coverage, summary: v.summary };
+              }),
+            })
+          : h(
+              'div',
+              { className: 'os-card-b os-muted' },
+              '还没有视图。让 Agent 用 ontology_upsert_view 声明一个：列出某类使用者能看见哪些对象的哪些属性。' +
+                '属性名必须真的存在，否则整包校验不过。声明之后 ontology_get 带 view 参数就会按它裁剪。'
+            )
+      );
+      const viewsNote = h(
+        Notes,
+        null,
+        '视图是**声明与输出裁剪**，不是鉴权：不传 view 的调用看到的仍是全量，属性名写错会让整包校验失败而不是静默失效。真正的读权限需要宿主给出会话身份，那不在本插件范围内。'
+      );
       const harnessCard = hc
         ? h(
             Card,
@@ -3402,8 +3459,10 @@ select.os-input{padding-right:4px}
           h(Stat, { value: 'v' + (pkg.version || '?'), label: '当前版本', delta: pkg.status === 'published' ? '已发布' : '草稿' }),
           h(Stat, { value: String((pkg.objects || []).length), label: '受管对象', delta: (pkg.links || []).length + ' 条关系' }),
           h(Stat, { value: String(needApproval.length), label: '需审批动作', delta: needApproval.map(function (a) { return a.id; }).join(', ') || '无' }),
-          h(Stat, { value: String(entries.length), label: '变更记录', delta: '来自 .ontology-history.jsonl' })
+          h(Stat, { value: String(viewList.length), label: '角色视角', delta: totalProps + ' 个属性中按视图裁剪' })
         ),
+        viewsCard,
+        viewsCard,
         h(
           Card,
           {
@@ -3433,10 +3492,11 @@ select.os-input{padding-right:4px}
               })
             : h('div', { className: 'os-card-b os-muted' }, '还没有任何变更记录：这个包还没被改过。')
         ),
+        viewsNote,
         h(
           Notes,
           null,
-          '这里只记录「资产包变了什么」。权限模型、审核流程、跨环境发布仍是演示数据——那些需要真实的身份与审批后端。'
+          '这里记录「资产包变了什么」和「谁能看见什么」。审核流程、跨环境发布、数据级读权限的执行仍是演示数据——那些需要真实的身份与审批后端。'
         )
       );
     }

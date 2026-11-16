@@ -384,6 +384,53 @@ async function call(route, url, method = 'GET', body) {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  console.log('\nGET /views');
+
+  await it('没有视图时返回空列表，但给出全量统计', async () => {
+    const res = await call(routes[0], `${PREFIX}/views?id=retail.store-inventory`);
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.ok, true);
+    assert.deepEqual(body.value.views, []);
+    assert.equal(body.value.total.objects, 6);
+    assert.equal(body.value.total.properties, 28);
+  });
+
+  await it('有视图时返回覆盖情况，面板据此能说出差多少', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-views-'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), 'utf8'));
+    pkg.views = [
+      {
+        id: 'store-manager',
+        name: '门店店长视角',
+        objects: [{ objectId: 'Inventory', properties: ['storeId', 'skuId', 'availableQty'] }],
+      },
+    ];
+    fs.writeFileSync(path.join(dir, 'store-inventory.ir.json'), JSON.stringify(pkg, null, 2));
+
+    const alt = register(dir);
+    registerRoutes(alt.ctx, { store: createStore({ dir }), prefix: PREFIX });
+    const res = await call(alt.routes[0], `${PREFIX}/views?id=retail.store-inventory`);
+    assert.equal(res.statusCode, 200);
+    const value = res.json().value;
+    assert.equal(value.views.length, 1);
+    const view = value.views[0];
+    assert.equal(view.id, 'store-manager');
+    assert.equal(view.coverage.length, 1);
+    assert.equal(view.coverage[0].covered.length, 3);
+    assert.equal(view.coverage[0].total, 8);
+    assert.match(view.summary, /1 个对象/);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  await it('缺 id 时 400，包不存在时 404', async () => {
+    const missing = await call(routes[0], `${PREFIX}/views`);
+    assert.equal(missing.statusCode, 400);
+    const gone = await call(routes[0], `${PREFIX}/views?id=nope`);
+    assert.equal(gone.statusCode, 404);
+  });
+
   const total = pass + failures.length;
   console.log(`\n${pass}/${total} passed`);
   if (failures.length) {

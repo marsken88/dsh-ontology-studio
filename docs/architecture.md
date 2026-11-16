@@ -133,7 +133,7 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 dsh-ontology-studio/
 ├─ package.json            # bundle 清单：dsh.bundle.patch + dsh.client
 ├─ cordis.patch.yml        # 把插件行插入 profile 花名册
-├─ index.js                # 宿主半：32 个工具 + 读写 HTTP 路由 + 上下文注入
+├─ index.js                # 宿主半：34 个工具 + 读写 HTTP 路由 + 上下文注入
 ├─ lib/
 │  ├─ ir.mjs               # 校验器、统计、影响分析（纯函数，无依赖）
 │  ├─ expr.mjs / expr-lexer.mjs  # 规则表达式词法与递归下降求值（不用 eval）
@@ -156,6 +156,7 @@ dsh-ontology-studio/
 │  ├─ openapi.mjs          # 本体 → OpenAPI 3.1（按主键生成路径参数）
 │  ├─ datasource.mjs       # CSV → 对象草稿 → 资产包 IR（纯函数，不写盘）
 │  ├─ sync.mjs             # 同步状态：内容指纹、列结构差异、人读的一句话
+│  ├─ views.mjs            # 角色视角：声明的校验、覆盖统计、按视图投影
 │  └─ lint.mjs             # config.lintRules 团队约定
 ├─ USAGE.md                # 面向使用者的操作说明（面板怎么点、Agent 怎么说）
 ├─ client.js               # 浏览器半：主面板 + 侧栏入口 + 九个页面 + 三个编辑器

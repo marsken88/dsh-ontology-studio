@@ -23,6 +23,7 @@ import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { generateOpenApi } from './lib/openapi.mjs';
 import { draftFromCsvFile, packageFromDraft } from './lib/datasource.mjs';
 import { nextSyncState, syncFileName, describeSync } from './lib/sync.mjs';
+import { projectPackage, viewCoverage, describeView, viewsOf } from './lib/views.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -36,7 +37,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.54.0';
+const CODE_VERSION = '0.55.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -47,6 +48,19 @@ export const inject = ['tools'];
 const text = (value) => [{ type: 'text', text: value }];
 
 const lines = (items) => items.filter(Boolean).join('\n');
+
+/** 一行说清视图裁掉了什么——裁剪不能是静默的。 */
+function hiddenLine(hidden) {
+  if (!hidden) return '';
+  const bits = [];
+  if (hidden.objects && hidden.objects.length) bits.push(`不可见对象 ${hidden.objects.join('、')}`);
+  if (hidden.properties && hidden.properties.length) bits.push(`被裁掉的属性 ${hidden.properties.length} 个`);
+  if (hidden.rules && hidden.rules.length) bits.push(`不在此视角的规则 ${hidden.rules.length} 条`);
+  if (hidden.actions && hidden.actions.length) {
+    bits.push(`不可用动作 ${hidden.actions.map((a) => (a && a.id) || a).join('、')}`);
+  }
+  return bits.length ? '裁剪：' + bits.join('；') : '';
+}
 
 export function apply(ctx, config = {}) {
   const assetsDir = config.assetsDir ? path.resolve(config.assetsDir) : path.join(here, 'assets');
@@ -507,12 +521,13 @@ export function apply(ctx, config = {}) {
   register({
     name: 'ontology_get',
     description:
-      '读取一个本体资产包的结构。只给 packageId 时返回包摘要；同时给 objectId 时返回该对象的属性、关系、相关规则与动作——给 Agent 组织业务上下文用。',
+      '读取一个本体资产包的结构。只给 packageId 时返回包摘要；同时给 objectId 时返回该对象的属性、关系、相关规则与动作——给 Agent 组织业务上下文用。带上 view 参数则按该视图（角色视角）裁剪：看不见的对象与属性不会出现在返回里，被裁掉的内容记在 hidden。',
     parameters: {
       type: 'object',
       properties: {
         packageId: { type: 'string', description: '资产包 id，例如 retail.store-inventory' },
         objectId: { type: 'string', description: '可选：对象 id，例如 Inventory' },
+        view: { type: 'string', description: '可选：视图 id，按这个角色视角裁剪返回' },
       },
       required: ['packageId'],
       additionalProperties: false,
@@ -529,6 +544,9 @@ export function apply(ctx, config = {}) {
           rules: { type: 'array' },
           actions: { type: 'array' },
           problems: { type: 'array' },
+          view: { type: 'object' },
+          hidden: { type: 'object' },
+          notes: { type: 'array' },
         },
       },
       render: (_args, value) => {
@@ -544,18 +562,22 @@ export function apply(ctx, config = {}) {
           return text(
             lines([
               `${v.package.name} / ${v.object.name} (${v.object.id})`,
+              v.view ? `视角：${v.view.name}（${v.view.id}）` : '',
               v.object.description || '',
               '属性：',
               ...props,
               v.links && v.links.length ? `关系：${v.links.map((l) => `${l.type} → ${l.source === v.object.id ? l.target : l.source}`).join(', ')}` : '',
               v.actions && v.actions.length ? `可用动作：${v.actions.map((a) => a.id + (a.approvalRequired ? '(需审批)' : '')).join(', ')}` : '',
+              v.hidden ? hiddenLine(v.hidden) : '',
             ])
           );
         }
         return text(
           lines([
             `${v.package.name} (${v.package.id}) v${v.package.version} · ${v.package.status}`,
+            v.view ? `视角：${v.view.name}（${v.view.id}）` : '',
             `对象：${(v.objects || []).map((o) => o.id).join(', ')}`,
+            v.hidden ? hiddenLine(v.hidden) : '',
           ])
         );
       },
@@ -569,7 +591,25 @@ export function apply(ctx, config = {}) {
           available: entries.map((e) => (e.ir ? e.ir.id : e.file)),
         };
       }
-      const ir = entry.ir;
+
+      // 视图是投影，不是鉴权：读的时候按视角裁剪，裁剪掉的东西照实说
+      let ir = entry.ir;
+      let projection = null;
+      if (args.view) {
+        projection = projectPackage(entry.ir, args.view);
+        if (!projection.ok) {
+          return {
+            found: false,
+            package: summarizeIr(entry.ir),
+            problems: [{ message: projection.message }],
+            available: viewsOf(entry.ir).map((v) => v.id),
+          };
+        }
+        ir = projection.ir;
+      }
+      const extra = projection
+        ? { view: projection.view, hidden: projection.hidden, notes: projection.notes }
+        : {};
 
       if (!args.objectId) {
         return {
@@ -582,6 +622,7 @@ export function apply(ctx, config = {}) {
             properties: (o.properties || []).length,
             keys: o.keys || [],
           })),
+          ...extra,
         };
       }
 
@@ -590,8 +631,15 @@ export function apply(ctx, config = {}) {
         return {
           found: false,
           package: summarizeIr(ir),
-          problems: [{ message: `对象不存在：${args.objectId}` }],
+          problems: [
+            {
+              message: projection
+                ? `对象不存在或不在视图 ${args.view} 内：${args.objectId}`
+                : `对象不存在：${args.objectId}`,
+            },
+          ],
           objects: (ir.objects || []).map((o) => ({ id: o.id, name: o.name })),
+          ...extra,
         };
       }
       const links = (ir.links || []).filter((l) => l.source === obj.id || l.target === obj.id);
@@ -600,7 +648,7 @@ export function apply(ctx, config = {}) {
       const rules = (ir.rules || []).filter((r) =>
         [...propNames].some((n) => new RegExp(`\\b${n}\\b`).test(String(r.expression || '')))
       );
-      return { found: true, etag: entry.etag, package: summarizeIr(ir), object: obj, links, rules, actions };
+      return { found: true, etag: entry.etag, package: summarizeIr(ir), object: obj, links, rules, actions, ...extra };
     },
   });
 
@@ -1196,13 +1244,14 @@ export function apply(ctx, config = {}) {
   register({
     name: 'ontology_export',
     description:
-      '把本体导出成其它系统能消费的产物：json-schema（按对象生成校验用 JSON Schema，draft 2020-12）或 markdown（人读的参考文档：对象/属性/关系/规则/动作/策略）。只返回内容，不写文件。',
+      '把本体导出成其它系统能消费的产物：json-schema（按对象生成校验用 JSON Schema，draft 2020-12）、markdown（人读的参考文档）或 openapi（按主键生成 REST 路径）。只返回内容，不写文件。带 view 时先按视图裁剪再导出——给外部系统一份只含该角色可见字段的契约。',
     parameters: {
       type: 'object',
       properties: {
         packageId: { type: 'string' },
         format: { type: 'string', description: 'json-schema（默认）| markdown | openapi' },
         objectId: { type: 'string', description: 'json-schema 时可只导出一个对象' },
+        view: { type: 'string', description: '可选：按视图裁剪后再导出' },
       },
       required: ['packageId'],
       additionalProperties: false,
@@ -1226,12 +1275,18 @@ export function apply(ctx, config = {}) {
     execute: async (args) => {
       const { entry } = await store.get(args.packageId);
       if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
-      const ir = entry.ir;
+
+      let ir = entry.ir;
+      if (args.view) {
+        const projection = projectPackage(entry.ir, args.view);
+        if (!projection.ok) return { ok: false, message: projection.message };
+        ir = projection.ir;
+      }
       const format =
         args.format === 'markdown' ? 'markdown' : args.format === 'openapi' ? 'openapi' : 'json-schema';
 
       if (format === 'openapi') {
-        const doc = generateOpenApi(entry.ir);
+        const doc = generateOpenApi(ir);
         const text2 = JSON.stringify(doc, null, 2);
         return { ok: true, format: 'openapi', packageId: entry.ir.id, chars: text2.length, pathCount: Object.keys(doc.paths).length, schemaCount: Object.keys(doc.components.schemas).length, notes: doc.notes, content: text2 };
       }
@@ -2961,6 +3016,171 @@ export function apply(ctx, config = {}) {
         cascaded,
         file: saved.file,etag: saved.etag,
         problems: saved.problems,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_upsert_view  (write — 声明一个角色视角)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_upsert_view',
+    description:
+      '新增或替换一个视图（角色视角）：声明某类使用者能看见哪些对象的哪些属性。属性名必须真的存在，否则整包校验不过、什么都不写。这是可校验的声明与输出裁剪，不是鉴权——不传 view 的调用仍看到全量。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '资产包 id' },
+        view: {
+          type: 'object',
+          description: '视图定义：{ id, name, description?, objects: [{ objectId, properties: [] }] }',
+        },
+      },
+      required: ['packageId', 'view'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          viewId: { type: 'string' },
+          action: { type: 'string' },
+          coverage: { type: 'array' },
+          summary: { type: 'string' },
+          problems: { type: 'array' },
+          message: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok === false) {
+          const lines = ['未写入：' + (v.message || '未知原因')];
+          for (const p of v.problems || []) lines.push('· ' + p.path + ' → ' + p.message);
+          return text(lines.join('\n'));
+        }
+        const lines = [
+          `视图 ${v.viewId} 已${v.action === 'created' ? '新增' : '更新'}（${v.packageId}）`,
+          v.summary,
+        ];
+        for (const c of v.coverage || []) {
+          lines.push(`· ${c.objectId}：${c.covered.length}/${c.total} 个属性` + (c.uncovered.length ? `，未暴露 ${c.uncovered.join('、')}` : ''));
+        }
+        lines.push('用 ontology_get 带 view 参数可以按这个视角读');
+        return text(lines.join('\n'));
+      },
+    },
+    approval: (args) => ({
+      destructive: false,
+      reason: `声明视图 ${args.view && args.view.id}（${args.packageId}）`,
+    }),
+    async execute(args) {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      if (!args.view || typeof args.view !== 'object' || Array.isArray(args.view)) {
+        return { ok: false, message: 'view 必须是一个对象定义' };
+      }
+
+      let action = 'created';
+      const outcome = await store.update(entry.file, (ir) => {
+        const list = Array.isArray(ir.views) ? ir.views : [];
+        const index = list.findIndex((v) => v.id === args.view.id);
+        if (index >= 0) {
+          action = 'updated';
+          list[index] = args.view;
+        } else {
+          list.push(args.view);
+        }
+        ir.views = list;
+        return {};
+      });
+      if (outcome.ok === false) {
+        return {
+          ok: false,
+          packageId: args.packageId,
+          viewId: args.view.id,
+          problems: outcome.problems,
+          message: '视图没有通过整包校验，磁盘未改动',
+        };
+      }
+
+      const view = (outcome.ir.views || []).find((v) => v.id === args.view.id);
+      return {
+        ok: true,
+        packageId: args.packageId,
+        viewId: args.view.id,
+        action,
+        coverage: viewCoverage(outcome.ir, view),
+        summary: describeView(outcome.ir, view),
+        problems: [],
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_delete_view  (write — 删掉一个角色视角)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_delete_view',
+    description: '删除一个视图（角色视角）。视图不存在时拒绝；删掉之后按这个视角读取会明确报错，不会静默降级成全量。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '资产包 id' },
+        viewId: { type: 'string', description: '视图 id' },
+      },
+      required: ['packageId', 'viewId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          viewId: { type: 'string' },
+          remaining: { type: 'array' },
+          message: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok === false) return text('未删除：' + (v.message || '未知原因'));
+        return text(
+          `已删除视图 ${v.viewId}（${v.packageId}）` +
+            (v.remaining && v.remaining.length ? `\n仍保留：${v.remaining.join('、')}` : '\n这个包现在没有视图了')
+        );
+      },
+    },
+    approval: (args) => ({
+      destructive: true,
+      reason: `删除视图 ${args.viewId}（${args.packageId}）`,
+    }),
+    async execute(args) {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+      const exists = (entry.ir.views || []).some((v) => v.id === args.viewId);
+      if (!exists) {
+        return {
+          ok: false,
+          message: `视图不存在：${args.viewId}。现有视图：${(entry.ir.views || []).map((v) => v.id).join('、') || '无'}`,
+        };
+      }
+      const outcome = await store.update(entry.file, (ir) => {
+        ir.views = (ir.views || []).filter((v) => v.id !== args.viewId);
+        return {};
+      });
+      if (outcome.ok === false) {
+        return { ok: false, problems: outcome.problems, message: '删除后整包校验不通过，磁盘未改动' };
+      }
+      return {
+        ok: true,
+        packageId: args.packageId,
+        viewId: args.viewId,
+        remaining: (outcome.ir.views || []).map((v) => v.id),
       };
     },
   });

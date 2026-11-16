@@ -94,6 +94,13 @@
     },
     "extensions": {
       "type": "object"
+    },
+    "views": {
+      "type": "array",
+      "description": "角色视角：声明某类使用者能看见哪些对象的哪些属性。这是可校验的声明与输出裁剪，不是鉴权——不传 view 的调用仍看到全量。",
+      "items": {
+        "$ref": "#/$defs/view"
+      }
     }
   },
   "$defs": {
@@ -459,6 +466,57 @@
             "deny",
             "audit-only"
           ]
+        }
+      }
+    },
+    "view": {
+      "type": "object",
+      "description": "一个视图：列出可见的对象与属性。没列出的对象不可见，没列出的属性被裁掉。",
+      "required": [
+        "id",
+        "name",
+        "objects"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "objects": {
+          "type": "array",
+          "minItems": 1,
+          "description": "视图内的对象条目；每个条目说明这个对象暴露哪些属性",
+          "items": {
+            "$ref": "#/$defs/viewObject"
+          }
+        }
+      }
+    },
+    "viewObject": {
+      "type": "object",
+      "required": [
+        "objectId",
+        "properties"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "objectId": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

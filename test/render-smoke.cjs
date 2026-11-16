@@ -155,6 +155,22 @@ React.__setLive({
     { ts: 1700000002000, packageId: ir.id, version: '1.1.0', op: 'upsert_object', target: 'Warehouse', summary: '新增对象 Warehouse' },
     { ts: 1700000001000, packageId: ir.id, version: '1.0.0', op: 'publish', target: ir.id, summary: '发布 1.0.0 → 1.1.0' },
   ],
+  views: {
+    packageId: ir.id,
+    total: { objects: 6, properties: 28 },
+    views: [
+      {
+        id: 'store-manager',
+        name: '门店店长视角',
+        description: '只看库存与商品',
+        summary: '2 个对象 / 5 个属性，本视图内的对象还有 5 个属性未暴露，另有 4 个对象完全不可见',
+        coverage: [
+          { objectId: 'Inventory', total: 8, covered: ['storeId', 'skuId', 'availableQty', 'safetyStock'], uncovered: ['onHandQty'] },
+          { objectId: 'Product', total: 5, covered: ['productId'], uncovered: ['productName'] },
+        ],
+      },
+    ],
+  },
   sync: {
     count: 1,
     sources: [
@@ -192,7 +208,7 @@ const expectations = {
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明', '在示例数据上跑一次', '+ 新增规则', '需审批'],
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行', 'CSV 数据源同步', 'demo.stock', '新增列 lead_time'],
-  governance: ['变更历史', 'upsert_object', 'v1.1.0'],
+  governance: ['变更历史', 'upsert_object', 'v1.1.0', '角色视角（视图）', 'store-manager', 'Inventory 4/8'],
   marketplace: ['资产市场', '会员权益资产包', '可安装'],
   app: ['页面清单', '操作表单', 'adjustInventory'],
   agent: ['Agent 花名册', 'stock-replenisher', '2 次'],

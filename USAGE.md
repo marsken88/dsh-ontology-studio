@@ -27,7 +27,7 @@ DeepSeek Harness 左侧栏 → **Ontology Studio**。
 | Agent & Harness | 哪些 Agent 声明在用这个本体、调用成功率 |
 | 应用构建 | 由本体元数据生成的页面规格（列、筛选器、表单） |
 | 资产市场 | 可安装 / 可升级的资产包 |
-| 治理中心 | 变更历史 |
+| 治理中心 | 变更历史；**角色视角（视图）的覆盖情况** |
 | 可观测与评测 | 工具调用轨迹 |
 
 ---
@@ -86,6 +86,42 @@ DeepSeek Harness 左侧栏 → **Ontology Studio**。
 - 审批：`applySchema: true` 算破坏性写，要过闸门；只是记录同步状态不需要
 
 面板「数据接入」页有一张 **CSV 数据源同步** 卡片，列出资产包、对象、行数、同步次数和一句话说明；没有同步记录时显示接入方法，而不是编一行假数据。
+
+---
+
+## 四、角色视角：视图（声明，不是鉴权）
+
+一个视图声明「某类使用者能看见哪些对象的哪些属性」：
+
+```json
+{
+  "id": "store-manager",
+  "name": "门店店长视角",
+  "objects": [
+    { "objectId": "Inventory", "properties": ["storeId", "skuId", "availableQty", "safetyStock"] },
+    { "objectId": "Product", "properties": ["productId", "productName"] }
+  ]
+}
+```
+
+让 Agent 说「给这个包声明一个门店店长视角，只看库存数量和商品名」即可（`ontology_upsert_view`，写盘；`ontology_delete_view` 删）。
+
+声明之后：
+
+| 做什么 | 怎么说 | 结果 |
+| --- | --- | --- |
+| 按视角读 | 「用 store-manager 视角看 Inventory」 | `ontology_get` 带 `view`，只返回视图内的对象与属性 |
+| 按视角导出 | 「按 store-manager 导一份 JSON Schema」 | `ontology_export` 带 `view`，外部系统拿到的契约不含隐藏字段 |
+| 看视角覆盖 | 打开治理中心 | 治理中心列出每个视图覆盖了哪些对象、几个属性 |
+
+**它是什么**：一份**可校验的声明**。属性名写错（比如 `costPrice` 根本不存在）会让整包校验失败、磁盘不动——「权限表」不会悄悄写成一个不存在的字段。
+
+**它不是什么**：不是鉴权。不传 `view` 的调用看到的仍然是全量；裁剪只是输出层的投影。真正的读权限需要宿主给出会话身份，那不在本插件的能力范围里。
+
+两个刻意的取舍：
+
+- 规则**不按视图删**。窄视图下 `lowStockWarning` 仍会读被裁掉的 `safetyStock`，这种情况记进 `leaks` 并说明，而不是让同一条规则在不同视角下忽隐忽现
+- 动作**按属性挡**，不只看对象。`effect` 会碰具体属性，碰到被裁掉的属性就让投影出来的包不合法——与其把坏包交给 Agent，不如把动作挡在外面并说明原因
 
 ---
 
