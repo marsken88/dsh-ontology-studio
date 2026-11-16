@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.37.4';
+    const CLIENT_VERSION = '0.37.5';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -73,8 +73,8 @@ window.__ModuleLoader__.load({
 .os-tbl-wrap{overflow-x:auto}
 .os-tbl-wrap>.os-tbl{min-width:100%}
 .os-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
-.os-card-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.os-card-t{flex:1;min-width:0;font-size:12px;font-weight:600}
+.os-card-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.os-card-t{flex:1;min-width:0;font-size:12px;font-weight:600;white-space:nowrap}
 .os-card-s{font-size:11px;color:var(--dsw-alias-label-secondary)}
 .os-card-b{padding:12px 14px}
 .os-field{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -1936,12 +1936,12 @@ select.os-input{padding-right:4px}
                       className: 'os-btn',
                       onClick: function () { setView2('graph'); },
                     },
-                    '图谱视图'
+                    '图谱'
                   ),
                   h(
                     'button',
                     { type: 'button', className: 'os-btn', onClick: function () { setEditing('new'); } },
-                    '+ 新建对象'
+                    '+ 新建'
                   )
                 )
               : null,
