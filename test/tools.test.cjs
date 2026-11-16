@@ -118,6 +118,7 @@ function fakeContext(options = {}) {
       'ontology_impact',
       'ontology_install_asset',
       'ontology_list',
+      'ontology_package_from_csv',
       'ontology_publish',
       'ontology_records',
       'ontology_regression_plan',
@@ -190,13 +191,13 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 29, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 30, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 29);
+    assert.equal(alt.registered.length, 30);
   });
 
   await it('客户端版本常量与 package.json 一致', () => {

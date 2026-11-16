@@ -21,7 +21,7 @@ import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { generateOpenApi } from './lib/openapi.mjs';
-import { draftFromCsvFile } from './lib/datasource.mjs';
+import { draftFromCsvFile, packageFromDraft } from './lib/datasource.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -35,7 +35,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.52.0';
+const CODE_VERSION = '0.53.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1850,6 +1850,82 @@ export function apply(ctx, config = {}) {
         etag: saved.etag,
         summary: describeDiff(diff),
         problems: saved.problems,
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_package_from_csv  (write — 从 CSV 生成并安装新资产包)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_package_from_csv',
+    description:
+      '从 CSV 生成并安装一个新的资产包：读文件 → 推断列类型 → 生成 IR → 整包校验 → 写入资产目录。包已存在时拒绝，校验不通过时什么都不写。这是一次真实写入，会走人工审批。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'CSV 文件路径' },
+        packageId: { type: 'string', description: '资产包 id，例如 demo.inventory-snapshot' },
+        name: { type: 'string', description: '包名，默认取文件名' },
+        domain: { type: 'string', description: '业务域，默认 external' },
+        keyColumns: { type: 'array', items: { type: 'string' }, description: '主键列，默认第一列' },
+      },
+      required: ['path', 'packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          file: { type: 'string' },
+          etag: { type: 'string' },
+          rowCount: { type: 'number' },
+          message: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (v) => {
+        if (!v || v.ok === false) return text('未安装：' + ((v && v.message) || '未知原因'));
+        return text(
+          [
+            '已安装资产包 ' + v.packageId + '（' + v.rowCount + ' 行）',
+            '文件：' + v.file,
+            '状态是 draft，确认后用 ontology_publish 发布',
+          ].join('\n')
+        );
+      },
+    },
+    async execute(args) {
+      const draft = await draftFromCsvFile({ path: args.path, keyColumns: args.keyColumns });
+      if (!draft.ok) return { ok: false, message: draft.problem || 'CSV 无法解析' };
+
+      const built = packageFromDraft(draft, {
+        packageId: args.packageId,
+        name: args.name,
+        domain: args.domain,
+      });
+      if (!built.ok) return { ok: false, message: built.problem };
+
+      const validation = validateIr(built.ir);
+      if (!validation.ok) {
+        return { ok: false, problems: validation.problems, message: '生成的包没有通过校验' };
+      }
+
+      const existing = await store.get(args.packageId);
+      if (existing && existing.entry) {
+        return { ok: false, message: '资产包已存在：' + args.packageId + '（不覆盖）' };
+      }
+
+      const saved = await store.save(args.packageId + '.ir.json', built.ir, {});
+      return {
+        ok: saved.ok !== false,
+        packageId: args.packageId,
+        file: saved.file,
+        etag: saved.etag,
+        rowCount: draft.rowCount,
+        problems: saved.problems || [],
       };
     },
   });
