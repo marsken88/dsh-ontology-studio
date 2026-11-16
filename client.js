@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.40.0';
+    const CLIENT_VERSION = '0.41.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -757,6 +757,9 @@ select.os-input{padding-right:4px}
                 get('/app-spec?id=' + encodeURIComponent(first.id)).catch(function () {
                   return { value: null };
                 }),
+                get('/harness?id=' + encodeURIComponent(first.id)).catch(function () {
+                  return { value: null };
+                }),
                 get('/agents?id=' + encodeURIComponent(first.id)).catch(function () {
                   return { value: null };
                 }),
@@ -767,7 +770,8 @@ select.os-input{padding-right:4px}
                 const historyEntries = (both[2] && both[2].value && both[2].value.entries) || [];
                 const catalog = (both[3] && both[3].value) || null;
                 const appSpec = (both[4] && both[4].value) || null;
-                const agents = (both[5] && both[5].value) || null;
+                const harness = (both[5] && both[5].value) || null;
+                const agents = (both[6] && both[6].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -779,6 +783,7 @@ select.os-input{padding-right:4px}
                   history: historyEntries,
                   catalog: catalog,
                   appSpec: appSpec,
+                  harness: harness,
                   agents: agents,
                 });
               });
@@ -881,6 +886,7 @@ select.os-input{padding-right:4px}
           history: state.history || [],
           catalog: state.catalog || null,
           appSpec: state.appSpec || null,
+          harness: state.harness || null,
           agents: state.agents || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
@@ -903,6 +909,7 @@ select.os-input{padding-right:4px}
         history: [],
         catalog: null,
         appSpec: null,
+        harness: null,
         agents: null,
         dir: null,
         file: null,
@@ -3159,9 +3166,33 @@ select.os-input{padding-right:4px}
       const needApproval = (pkg.actions || []).filter(function (a) {
         return a.approvalRequired === true;
       });
+      const hc = model.harness || null;
+      const gaps = (hc && hc.gaps) || [];
+      const harnessCard = hc
+        ? h(
+            Card,
+            {
+              title: '本体体检',
+              sub: hc.readyAreas + '/' + hc.totalAreas + ' 个方面就绪' + (gaps.length ? '，' + gaps.length + ' 处缺口' : ''),
+              extra: h(Badge, { tone: gaps.length ? 'warn' : 'on' }, hc.verdict === 'ready' ? '就绪' : '待补'),
+              flush: true,
+            },
+            gaps.length
+              ? h(Table, {
+                  columns: [
+                    { key: 'area', label: '方面', width: '12%', render: function (r) { return h(Badge, { tone: 'brand' }, r.area); } },
+                    { key: 'title', label: '缺口' },
+                    { key: 'how', label: '怎么补' },
+                  ],
+                  rows: gaps.map(function (g, i) { return { key: i, area: g.area, title: g.title, how: g.how }; }),
+                })
+              : h('div', { className: 'os-card-b os-muted' }, '六个方面都齐了。')
+          )
+        : null;
       return h(
         'div',
         { className: 'os-grid' },
+        harnessCard,
         h(
           'div',
           { className: 'os-grid os-g4' },

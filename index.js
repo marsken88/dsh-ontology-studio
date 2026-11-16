@@ -33,7 +33,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.40.0';
+const CODE_VERSION = '0.41.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -225,6 +225,13 @@ export function apply(ctx, config = {}) {
         }
         const result = evaluateRules(entry.ir, loaded.records);
         return Object.assign({ packageId: id, available: true }, result);
+      },
+      // 只读：体检结果直接给面板，不走审批。
+      harness: async (id) => {
+        const { entry } = await store.get(id);
+        if (!entry || !entry.ir) return null;
+        const loaded = await loadRecords(entry.file);
+        return harnessCheck(entry.ir, { records: loaded.records || null });
       },
       agents: async (id) => {
         const { entry } = await store.get(id);
