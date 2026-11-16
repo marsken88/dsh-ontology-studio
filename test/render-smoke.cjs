@@ -155,6 +155,21 @@ React.__setLive({
     { ts: 1700000002000, packageId: ir.id, version: '1.1.0', op: 'upsert_object', target: 'Warehouse', summary: '新增对象 Warehouse' },
     { ts: 1700000001000, packageId: ir.id, version: '1.0.0', op: 'publish', target: ir.id, summary: '发布 1.0.0 → 1.1.0' },
   ],
+  sync: {
+    count: 1,
+    sources: [
+      {
+        packageId: 'demo.stock',
+        objectId: 'Stock',
+        path: 'D:/data/stock.csv',
+        at: '2026-11-16T09:00:00.000Z',
+        rowCount: 3,
+        columnCount: 5,
+        runs: 2,
+        summary: '上次同步 2026-11-16 17:00:00：3 行，行数 +1；新增列 lead_time',
+      },
+    ],
+  },
   records: {
     file: '<assets>/store-inventory.records.json',
     totalRows: 11,
@@ -176,7 +191,7 @@ const expectations = {
   ontology: ['Inventory', 'availableQty', 'belongsTo', '+ 新增关系', '+ 新建', '图谱', '要重验什么', '与市场版本对比'],
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get'],
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明', '在示例数据上跑一次', '+ 新增规则', '需审批'],
-  data: ['事实数据', '属性覆盖', 'Inventory · 5 行'],
+  data: ['事实数据', '属性覆盖', 'Inventory · 5 行', 'CSV 数据源同步', 'demo.stock', '新增列 lead_time'],
   governance: ['变更历史', 'upsert_object', 'v1.1.0'],
   marketplace: ['资产市场', '会员权益资产包', '可安装'],
   app: ['页面清单', '操作表单', 'adjustInventory'],
