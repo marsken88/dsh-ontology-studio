@@ -271,6 +271,27 @@ const EXEC = { agent: { id: 'test-agent' }, callId: 'call-1' };
     assert.deepEqual((ir.metrics || []).map((m) => m.object).filter((o) => o === 'Inventory'), []);
     fs.rmSync(d4, { recursive: true, force: true });
   });
+  /**
+   * 结构性守卫：对随包资产里的每一个对象做级联删除，结果都必须是合法包。
+   * 「新加一种引用类型，却忘了在级联里清理」已经踩过两次（views、metrics），
+   * 这条用例管的是「级联之后包还合法吗」，不针对某一种引用。
+   */
+  await it('任意对象级联删除后，整包仍然合法', async () => {
+    const seed = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), 'utf8'));
+    const objectIds = seed.objects.map((o) => o.id);
+    for (const objectId of objectIds) {
+      const work = fs.mkdtempSync(path.join(os.tmpdir(), 'onto-cascade-'));
+      const a = path.join(work, 'assets');
+      fs.mkdirSync(a, { recursive: true });
+      fs.writeFileSync(path.join(a, 'store-inventory.ir.json'), JSON.stringify(seed, null, 2));
+      const { ctx: c, registered: r } = fakeContext({ request: async () => 'allowed-once' });
+      mod.apply(c, { assetsDir: a, trace: false, history: false });
+      const by = Object.fromEntries(r.map((d) => [d.name, d]));
+      const out = await by.ontology_delete_object.execute({ packageId: PKG, objectId, cascade: true }, EXEC);
+      assert.equal(out.ok, true, objectId + ' 级联删除失败：' + JSON.stringify(out.problems || []));
+      fs.rmSync(work, { recursive: true, force: true });
+    }
+  });
   fs.rmSync(dir, { recursive: true, force: true });
 
   const total = pass + failures.length;
