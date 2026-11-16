@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.48.3';
+    const CLIENT_VERSION = '0.48.4';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3877,26 +3877,21 @@ select.os-input{padding-right:4px}
                 type: 'button',
                 className: 'os-btn',
                 title: '回到对话窗口（审批在那里进行）',
-                onClick: function () {
-                  const pick = function () {
-                    if (!panelCtx) return null;
-                    if (panelCtx.layout && typeof panelCtx.layout.selectPanel === 'function') return panelCtx.layout;
-                    if (typeof panelCtx.get === 'function') {
-                      const svc = panelCtx.get('layout');
-                      if (svc && typeof svc.selectPanel === 'function') return svc;
-                    }
-                    return null;
-                  };
-                  const svc = pick();
-                  if (!svc) {
-                    window.alert('拿不到切换面板的能力。请直接点左侧栏的会话条目回到对话。');
-                    return;
-                  }
+                                onClick: function () {
                   try {
+                    var svc = null;
+                    if (panelCtx) {
+                      svc = panelCtx.layout;
+                      if (!svc && typeof panelCtx.get === 'function') svc = panelCtx.get('layout');
+                    }
+                    if (!svc || typeof svc.undefined !== 'function') {
+                      window.alert('拿不到 layout 服务。请用左侧栏操作。');
+                      return;
+                    }
                     svc.selectPanel(null);
-                    window.alert('已调用 selectPanel(null)，如果没有切换说明 null 不是正确的面板 ID。');
+                    window.alert('已调用 selectPanel(null)（若界面没变化，说明参数需要调整）');
                   } catch (err) {
-                    window.alert('回到对话失败：' + (err && err.message ? err.message : String(err)));
+                    window.alert('layout 出错：' + (err && err.message ? err.message : String(err)));
                   }
                 },
               },
@@ -3908,26 +3903,21 @@ select.os-input{padding-right:4px}
                 type: 'button',
                 className: 'os-btn',
                 title: '开一个新会话。新会话按默认权限预设创建，审批会被询问',
-                onClick: function () {
-                  const pick = function () {
-                    if (!panelCtx) return null;
-                    if (panelCtx.uiWorkspace && typeof panelCtx.uiWorkspace.startSession === 'function') return panelCtx.uiWorkspace;
-                    if (typeof panelCtx.get === 'function') {
-                      const svc = panelCtx.get('uiWorkspace');
-                      if (svc && typeof svc.startSession === 'function') return svc;
-                    }
-                    return null;
-                  };
-                  const svc = pick();
-                  if (!svc) {
-                    window.alert('这个客户端版本拿不到开新会话的能力。请点左侧栏的「+ 新会话」手动开一个。');
-                    return;
-                  }
+                                onClick: function () {
                   try {
+                    var svc = null;
+                    if (panelCtx) {
+                      svc = panelCtx.uiWorkspace;
+                      if (!svc && typeof panelCtx.get === 'function') svc = panelCtx.get('uiWorkspace');
+                    }
+                    if (!svc || typeof svc.undefined !== 'function') {
+                      window.alert('拿不到 uiWorkspace 服务。请用左侧栏操作。');
+                      return;
+                    }
                     svc.startSession();
-                    window.alert('已调用 startSession()，如果没有出现新会话说明需要传 workspaceId。');
+                    window.alert('已调用 startSession()（若界面没变化，说明参数需要调整）');
                   } catch (err) {
-                    window.alert('开新会话失败：' + (err && err.message ? err.message : String(err)));
+                    window.alert('uiWorkspace 出错：' + (err && err.message ? err.message : String(err)));
                   }
                 },
               },
