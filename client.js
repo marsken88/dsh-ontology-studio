@@ -18,7 +18,8 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.46.1';
+    let panelCtx = null;
+    const CLIENT_VERSION = '0.47.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3872,6 +3873,20 @@ select.os-input{padding-right:4px}
             h('div', { className: 'os-head-t' }, h('h1', { className: 'os-title' }, meta[0]), h('div', { className: 'os-desc' }, meta[1])),
             h(
               'button',
+              {
+                type: 'button',
+                className: 'os-btn',
+                title: '回到对话窗口（审批在那里进行）',
+                onClick: function () {
+                  if (panelCtx && panelCtx.layout && typeof panelCtx.layout.selectPanel === 'function') {
+                    panelCtx.layout.selectPanel(null);
+                  }
+                },
+              },
+              '回到对话'
+            ),
+            h(
+              'button',
               { type: 'button', className: 'os-btn', onClick: reload, title: '重新读取宿主的资产、事实数据、历史、轨迹与市场' },
               '刷新'
             ),
@@ -3937,6 +3952,7 @@ select.os-input{padding-right:4px}
       apply(ctx) {
         const slots = ctx.slots;
         const label = () => 'Ontology Studio';
+        panelCtx = ctx;
         const bind = function (run) {
           if (typeof ctx.effect === 'function') ctx.effect(run);
           else run();
