@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.39.1';
+    const CLIENT_VERSION = '0.39.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3684,7 +3684,16 @@ select.os-input{padding-right:4px}
               { type: 'button', className: 'os-btn', onClick: reload, title: '重新读取宿主的资产、事实数据、历史、轨迹与市场' },
               '刷新'
             ),
-            h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产'),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'os-btn pri',
+                title: '到「本体模型」页新建对象',
+                onClick: function () { setPage('ontology'); },
+              },
+              '新建资产'
+            ),
             pkgBadge,
             h(Badge, { tone: model.live ? 'on' : 'warn' }, model.label),
             model.readOnly ? h(Badge, { tone: 'warn' }, '只读模式') : null,
