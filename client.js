@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.56.1';
+    const CLIENT_VERSION = '0.56.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -773,6 +773,7 @@ select.os-input{padding-right:4px}
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
+                const traceSummary = (both[0] && both[0].value && both[0].value.summary) || null;
                 const records = (both[1] && both[1].value) || null;
                 const historyEntries = (both[2] && both[2].value && both[2].value.entries) || [];
                 const catalog = (both[3] && both[3].value) || null;
@@ -788,6 +789,7 @@ select.os-input{padding-right:4px}
                   ir: pkg.value.ir,
                   error: null,
                   traces: entries,
+                  traceSummary: traceSummary,
                   records: records,
                   history: historyEntries,
                   catalog: catalog,
@@ -893,6 +895,7 @@ select.os-input{padding-right:4px}
           approval: state.value && state.value.approval ? state.value.approval : 'destructive',
           hostVersion: (state.value && state.value.version) || null,
           traces: state.traces || [],
+          traceSummary: state.traceSummary || null,
           records: state.records || null,
           history: state.history || [],
           catalog: state.catalog || null,
@@ -3912,6 +3915,7 @@ select.os-input{padding-right:4px}
       const model = props.model || buildModel({ phase: 'demo' });
       if (!model.live) return h(ObservabilityDemo, props);
       const live = model.traces || [];
+      const summary = model.traceSummary || null;
       const okCount = live.filter(function (e) { return e.ok; }).length;
       return h(
         'div',
@@ -3920,13 +3924,21 @@ select.os-input{padding-right:4px}
           'div',
           { className: 'os-grid os-g4' },
           h(Stat, { value: String(live.length), label: '已记录调用', delta: '来自执行轨迹' }),
-          h(Stat, { value: String(okCount), label: '成功', delta: live.length - okCount + ' 次失败' }),
           h(Stat, {
-            value: live.length ? Math.round(live.reduce(function (n, e) { return n + (e.ms || 0); }, 0) / live.length) + 'ms' : '—',
-            label: '平均耗时',
-            delta: 'P50 近似',
+            value: summary && summary.successRate !== null ? summary.successRate + '%' : '—',
+            label: '成功率',
+            delta: okCount + ' 成功 / ' + (live.length - okCount) + ' 失败',
           }),
-          h(Stat, { value: String((model.pkg && (model.pkg.actions || []).filter(function (a) { return a.effect && Array.isArray(a.inputSchema) && a.inputSchema.length; }).length) || 0), label: '可执行动作', delta: model.actions + ' 个本体动作' })
+          h(Stat, {
+            value: summary && summary.avgMs !== null ? summary.avgMs + 'ms' : '—',
+            label: '平均耗时',
+            delta: summary && summary.p95Ms !== null ? 'P95 ' + summary.p95Ms + 'ms · 最慢 ' + summary.slowestMs + 'ms' : '样本不足',
+          }),
+          h(Stat, {
+            value: summary && summary.topFailing.length ? String(summary.topFailing[0].fails) : '0',
+            label: '最常失败',
+            delta: summary && summary.topFailing.length ? summary.topFailing.map(function (t) { return t.tool + ' ' + t.fails; }).join('、') : '没有失败记录',
+          })
         ),
         h(
           Card,
@@ -3967,7 +3979,7 @@ select.os-input{padding-right:4px}
         h(
           Notes,
           null,
-          '这些是宿主真实记录的工具调用，每次 ontology_* 执行追加一行到 .ontology-traces.jsonl。评测指标仍是演示数据——真实评测需要把业务结果回写后才有基准。'
+          '上面四个数都是从 .ontology-traces.jsonl 真算的：调用次数、成功率、平均耗时与 P95、最常失败的工具。业务结果类指标（例如补货是否准确、任务是否成功）不在轨迹里——那需要把业务结果回写，硬算出来的数只会比演示数据更危险，因为它看起来是真的。'
         )
       );
     }

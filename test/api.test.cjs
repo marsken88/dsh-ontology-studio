@@ -444,6 +444,27 @@ async function call(route, url, method = 'GET', body) {
     assert.equal(gone.statusCode, 404);
   });
 
+  console.log("\nGET /traces");
+
+  await it('轨迹里带调用层面的摘要，且注明没有业务指标', async () => {
+    const alt = register(ROOT);
+    const fakeTrace = {
+      enabled: true,
+      list: async () => [
+        { ts: 1700000000000, tool: 'ontology_get', ok: true, ms: 10 },
+        { ts: 1700000001000, tool: 'ontology_get', ok: false, ms: 30, error: 'boom' },
+      ],
+    };
+    registerRoutes(alt.ctx, { store, prefix: PREFIX, trace: fakeTrace });
+    const res = await call(alt.routes[0], `${PREFIX}/traces?limit=10`);
+    const value = res.json().value;
+    assert.equal(value.entries.length, 2);
+    assert.equal(value.summary.total, 2);
+    assert.equal(value.summary.successRate, 50);
+    assert.equal(value.summary.avgMs, 20);
+    assert.equal(value.summary.topFailing[0].tool, 'ontology_get');
+  });
+
   const total = pass + failures.length;
   console.log(`\n${pass}/${total} passed`);
   if (failures.length) {

@@ -157,6 +157,7 @@ dsh-ontology-studio/
 │  ├─ datasource.mjs       # CSV → 对象草稿 → 资产包 IR（纯函数，不写盘）
 │  ├─ sync.mjs             # 同步状态：内容指纹、列结构差异、人读的一句话
 │  ├─ views.mjs            # 角色视角：声明的校验、覆盖统计、按视图投影
+│  ├─ observability.mjs    # 执行轨迹 → 调用层面指标（成功率、P95、最常失败）
 │  └─ lint.mjs             # config.lintRules 团队约定
 ├─ USAGE.md                # 面向使用者的操作说明（面板怎么点、Agent 怎么说）
 ├─ client.js               # 浏览器半：主面板 + 侧栏入口 + 九个页面 + 三个编辑器
