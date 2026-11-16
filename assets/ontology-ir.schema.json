@@ -4,114 +4,307 @@
   "title": "Ontology IR",
   "description": "平台内部统一的本体描述模型（Intermediate Representation）。所有建模入口（可视化、YAML/JSON、AI 反向建模、导入）最终都产出这份结构，再由它生成查询 API、Agent 工具定义、校验规则与测试用例。",
   "type": "object",
-  "required": ["irVersion", "id", "name", "version", "objects", "links"],
+  "required": [
+    "irVersion",
+    "id",
+    "name",
+    "version",
+    "objects",
+    "links"
+  ],
   "additionalProperties": false,
   "properties": {
-    "irVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "irVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9-]+)+$",
       "description": "资产包标识，带域前缀，例如 retail.store-inventory"
     },
-    "name": { "type": "string", "minLength": 1 },
-    "description": { "type": "string" },
-    "domain": { "type": "string" },
-    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
-    "owner": { "type": "string" },
-    "status": { "enum": ["draft", "published", "deprecated"] },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "published",
+        "deprecated"
+      ]
+    },
     "dependsOn": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "安装本包前必须已安装的其它资产包 id"
     },
     "agents": {
       "type": "array",
       "description": "使用本资产包的 Agent 花名册（声明式；运行数据另从执行轨迹读取）",
-      "items": { "$ref": "#/$defs/agent" }
+      "items": {
+        "$ref": "#/$defs/agent"
+      }
     },
-    "objects": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/object" } },
-    "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
-    "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
-    "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
-    "policies": { "type": "array", "items": { "$ref": "#/$defs/policy" } },
-    "extensions": { "type": "object" }
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/object"
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/link"
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "policies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/policy"
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
   },
   "$defs": {
     "object": {
       "type": "object",
-      "required": ["id", "name", "properties"],
+      "required": [
+        "id",
+        "name",
+        "properties"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
-        "name": { "type": "string", "minLength": 1 },
-        "description": { "type": "string" },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
         "keys": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "主键属性名；必须是本对象已声明的属性"
         },
-        "properties": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/property" } }
+        "properties": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/property"
+          }
+        }
       }
     },
     "property": {
       "type": "object",
-      "required": ["name", "type"],
+      "required": [
+        "name",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-        "label": { "type": "string" },
-        "type": { "enum": ["string", "number", "integer", "boolean", "date", "datetime", "money", "enum", "json"] },
-        "required": { "type": "boolean" },
-        "enum": { "type": "array", "minItems": 1, "items": { "type": "string" } },
-        "description": { "type": "string" }
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "date",
+            "datetime",
+            "money",
+            "enum",
+            "json"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "storage": {
+          "type": "string",
+          "description": "物理存储位置（表.列）。未声明表示这份本体没有存储映射。"
+        },
+        "indexed": {
+          "type": "boolean",
+          "description": "是否建立索引。未声明按未建索引处理。"
+        }
       }
     },
     "link": {
       "type": "object",
-      "required": ["id", "source", "target", "type"],
+      "required": [
+        "id",
+        "source",
+        "target",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-        "source": { "type": "string" },
-        "target": { "type": "string" },
-        "type": { "type": "string", "minLength": 1 },
-        "cardinality": { "enum": ["1:1", "1:n", "n:1", "n:m"] }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cardinality": {
+          "enum": [
+            "1:1",
+            "1:n",
+            "n:1",
+            "n:m"
+          ]
+        }
       }
     },
     "rule": {
       "type": "object",
-      "required": ["id", "name", "expression", "severity"],
+      "required": [
+        "id",
+        "name",
+        "expression",
+        "severity"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9]+)+$" },
-        "name": { "type": "string", "minLength": 1 },
-        "expression": { "type": "string", "minLength": 1 },
-        "severity": { "enum": ["error", "warn", "info"] },
-        "enabled": { "type": "boolean" },
-        "owner": { "type": "string" }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9]+)+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warn",
+            "info"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "owner": {
+          "type": "string"
+        }
       }
     },
     "action": {
       "type": "object",
-      "required": ["id", "name", "approvalRequired"],
+      "required": [
+        "id",
+        "name",
+        "approvalRequired"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-        "name": { "type": "string", "minLength": 1 },
-        "input": { "type": "string" },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "input": {
+          "type": "string"
+        },
         "inputSchema": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/property" },
+          "items": {
+            "$ref": "#/$defs/property"
+          },
           "description": "入参字段声明；没有它动作就无法被校验执行"
         },
-        "approvalRequired": { "type": "boolean" },
-        "writes": { "type": "array", "items": { "type": "string" } },
+        "approvalRequired": {
+          "type": "boolean"
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "effect": {
           "oneOf": [
-            { "$ref": "#/$defs/effect" },
-            { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/effect" } }
+            {
+              "$ref": "#/$defs/effect"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/effect"
+              }
+            }
           ],
           "description": "一个或多个声明式副作用，按顺序应用"
         }
@@ -120,41 +313,100 @@
     "agent": {
       "type": "object",
       "description": "使用本包的 Agent 声明：它依赖哪些对象、Skill、工具，以及评测口径。运行数据不在 IR 里，由执行轨迹提供。",
-      "required": ["id", "name"],
+      "required": [
+        "id",
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "name": { "type": "string", "minLength": 1 },
-        "model": { "type": "string" },
-        "status": { "enum": ["published", "gray", "draft", "retired"] },
-        "usesObjects": { "type": "array", "items": { "type": "string" } },
-        "skills": { "type": "array", "items": { "type": "string" } },
-        "tools": { "type": "array", "items": { "type": "string" } },
-        "actions": { "type": "array", "items": { "type": "string" } },
-        "evalTarget": { "type": "string", "description": "评测口径，例如「补货准确率 ≥ 85%」" },
-        "owner": { "type": "string" }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "published",
+            "gray",
+            "draft",
+            "retired"
+          ]
+        },
+        "usesObjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evalTarget": {
+          "type": "string",
+          "description": "评测口径，例如「补货准确率 ≥ 85%」"
+        },
+        "owner": {
+          "type": "string"
+        }
       }
     },
     "effect": {
       "type": "object",
       "description": "动作对事实数据的声明式副作用：按 matchKeys 定位行，再按 set 赋值 / adjust 做增量。增量是只含入参字段的算术表达式，不含任意代码。",
-      "required": ["object", "matchKeys"],
+      "required": [
+        "object",
+        "matchKeys"
+      ],
       "additionalProperties": false,
       "properties": {
-        "object": { "type": "string" },
+        "object": {
+          "type": "string"
+        },
         "matchKeys": {
           "type": "array",
           "minItems": 1,
           "items": {
             "oneOf": [
-              { "type": "string" },
+              {
+                "type": "string"
+              },
               {
                 "type": "object",
-                "required": ["field", "from"],
+                "required": [
+                  "field",
+                  "from"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "field": { "type": "string", "description": "目标对象上的属性名" },
-                  "from": { "type": "string", "description": "入参里的字段名" }
+                  "field": {
+                    "type": "string",
+                    "description": "目标对象上的属性名"
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "入参里的字段名"
+                  }
                 }
               }
             ]
@@ -163,26 +415,51 @@
         "set": {
           "type": "object",
           "minProperties": 1,
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "对象字段 → 入参字段名（直接赋值）"
         },
         "adjust": {
           "type": "object",
           "minProperties": 1,
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "对象字段 → 增量表达式，例如 \"-qty\" 或 \"qty * -1\""
         }
       }
     },
     "policy": {
       "type": "object",
-      "required": ["id", "name", "effect"],
+      "required": [
+        "id",
+        "name",
+        "effect"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9]+)+$" },
-        "name": { "type": "string", "minLength": 1 },
-        "appliesTo": { "type": "array", "items": { "type": "string" } },
-        "effect": { "enum": ["require-approval", "deny", "audit-only"] }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9]+)+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "appliesTo": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "effect": {
+          "enum": [
+            "require-approval",
+            "deny",
+            "audit-only"
+          ]
+        }
       }
     }
   }

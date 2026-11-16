@@ -20,18 +20,24 @@
           "name": "storeId",
           "label": "门店编号",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "store.store_id",
+          "indexed": true
         },
         {
           "name": "storeName",
           "label": "门店名称",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "store.store_name",
+          "indexed": false
         },
         {
           "name": "city",
           "label": "所属城市",
-          "type": "string"
+          "type": "string",
+          "storage": "store.city",
+          "indexed": false
         },
         {
           "name": "format",
@@ -41,12 +47,16 @@
             "大卖场",
             "标超",
             "便利店"
-          ]
+          ],
+          "storage": "store.format",
+          "indexed": false
         },
         {
           "name": "openDate",
           "label": "开业日期",
-          "type": "date"
+          "type": "date",
+          "storage": "store.open_date",
+          "indexed": false
         }
       ]
     },
@@ -62,28 +72,38 @@
           "name": "productId",
           "label": "商品编号",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "product.product_id",
+          "indexed": true
         },
         {
           "name": "productName",
           "label": "商品名称",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "product.product_name",
+          "indexed": false
         },
         {
           "name": "category",
           "label": "品类",
-          "type": "string"
+          "type": "string",
+          "storage": "product.category",
+          "indexed": false
         },
         {
           "name": "brand",
           "label": "品牌",
-          "type": "string"
+          "type": "string",
+          "storage": "product.brand",
+          "indexed": false
         },
         {
           "name": "shelfLifeDays",
           "label": "保质期（天）",
-          "type": "integer"
+          "type": "integer",
+          "storage": "product.shelf_life_days",
+          "indexed": false
         }
       ]
     },
@@ -100,43 +120,59 @@
           "name": "storeId",
           "label": "门店编号",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "inventory.store_id",
+          "indexed": true
         },
         {
           "name": "skuId",
           "label": "SKU 编号",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "inventory.sku_id",
+          "indexed": true
         },
         {
           "name": "onHandQty",
           "label": "在库数量",
-          "type": "number"
+          "type": "number",
+          "storage": "inventory.on_hand_qty",
+          "indexed": false
         },
         {
           "name": "availableQty",
           "label": "可售数量",
-          "type": "number"
+          "type": "number",
+          "storage": "inventory.available_qty",
+          "indexed": false
         },
         {
           "name": "lockedQty",
           "label": "锁定数量",
-          "type": "number"
+          "type": "number",
+          "storage": "inventory.locked_qty",
+          "indexed": false
         },
         {
           "name": "safetyStock",
           "label": "安全库存",
-          "type": "number"
+          "type": "number",
+          "storage": "inventory.safety_stock",
+          "indexed": false
         },
         {
           "name": "updatedAt",
           "label": "更新时间",
-          "type": "datetime"
+          "type": "datetime",
+          "storage": "inventory.updated_at",
+          "indexed": false
         },
         {
           "name": "lastStocktakeAt",
           "label": "上次盘点时间",
-          "type": "datetime"
+          "type": "datetime",
+          "storage": "inventory.last_stocktake_at",
+          "indexed": false
         }
       ]
     },
@@ -152,7 +188,9 @@
           "name": "orderId",
           "label": "订单号",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "order.order_id",
+          "indexed": true
         },
         {
           "name": "orderType",
@@ -162,17 +200,23 @@
             "销售",
             "采购",
             "调拨"
-          ]
+          ],
+          "storage": "order.order_type",
+          "indexed": false
         },
         {
           "name": "amount",
           "label": "金额",
-          "type": "money"
+          "type": "money",
+          "storage": "order.amount",
+          "indexed": false
         },
         {
           "name": "createdAt",
           "label": "创建时间",
-          "type": "datetime"
+          "type": "datetime",
+          "storage": "order.created_at",
+          "indexed": false
         }
       ]
     },
@@ -188,18 +232,24 @@
           "name": "supplierId",
           "label": "供应商编号",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "supplier.supplier_id",
+          "indexed": true
         },
         {
           "name": "supplierName",
           "label": "供应商名称",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "supplier.supplier_name",
+          "indexed": false
         },
         {
           "name": "leadTimeDays",
           "label": "到货周期（天）",
-          "type": "integer"
+          "type": "integer",
+          "storage": "supplier.lead_time_days",
+          "indexed": false
         }
       ]
     },
@@ -215,7 +265,9 @@
           "name": "memberId",
           "label": "会员编号",
           "type": "string",
-          "required": true
+          "required": true,
+          "storage": "member.member_id",
+          "indexed": true
         },
         {
           "name": "level",
@@ -225,12 +277,16 @@
             "普通",
             "银卡",
             "金卡"
-          ]
+          ],
+          "storage": "member.level",
+          "indexed": false
         },
         {
           "name": "joinDate",
           "label": "入会日期",
-          "type": "date"
+          "type": "date",
+          "storage": "member.join_date",
+          "indexed": false
         }
       ]
     }
