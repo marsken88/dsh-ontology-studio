@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.47.0';
+    const CLIENT_VERSION = '0.48.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3884,6 +3884,20 @@ select.os-input{padding-right:4px}
                 },
               },
               '回到对话'
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'os-btn',
+                title: '开一个新会话。新会话按默认权限预设创建，审批会被询问',
+                onClick: function () {
+                  if (panelCtx && panelCtx.uiWorkspace && typeof panelCtx.uiWorkspace.startSession === 'function') {
+                    panelCtx.uiWorkspace.startSession();
+                  }
+                },
+              },
+              '开新会话'
             ),
             h(
               'button',
