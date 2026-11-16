@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.55.0';
+    const CLIENT_VERSION = '0.56.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3234,8 +3234,230 @@ select.os-input{padding-right:4px}
       );
     }
 
+    /**
+     * 应用渲染预览：把页面规格真的渲染出来。
+     *
+     * 规格里有的三样都渲染：列、筛选器、详情字段。数据来自真实的
+     * `*.records.json`，所以列里空着的格子就是真的没有数据，不是占位。
+     *
+     * 动作表单不在这里执行：面板写入是人工操作，而动作会改事实数据，
+     * 执行要走 Agent 的审批闸门（卡片上写明了）。渲染器把「能看」和
+     * 「能改」分开，比做一个绕过闸门的按钮诚实。
+     */
+    function AppPreview(props) {
+      const page = props.page;
+      const packageId = props.packageId;
+      const [data, setData] = useState({ phase: 'waiting', rows: [], error: null });
+      const [values, setValues] = useState({});
+      const [sort, setSort] = useState({ field: '', dir: 'asc' });
+      const [picked, setPicked] = useState('');
+
+      useEffect(
+        function () {
+          let alive = true;
+          if (typeof fetch !== 'function') {
+            setData({ phase: 'error', rows: [], error: 'no fetch' });
+            return function () {};
+          }
+          setData({ phase: 'waiting', rows: [], error: null });
+          setPicked('');
+          fetch(
+            API_BASE + '/records?id=' + encodeURIComponent(packageId) + '&object=' + encodeURIComponent(page.source) + '&limit=50',
+            { credentials: 'same-origin', headers: { accept: 'application/json' } }
+          )
+            .then(function (res) {
+              if (!res.ok) throw new Error('records → ' + res.status);
+              return res.json();
+            })
+            .then(function (body) {
+              if (!alive) return;
+              const list = (body && body.value && body.value.objects) || [];
+              const hit = list.filter(function (o) { return o.id === page.source; })[0];
+              setData({ phase: 'ready', rows: (hit && hit.sample) || [], error: null });
+            })
+            .catch(function (error) {
+              if (alive) setData({ phase: 'error', rows: [], error: String(error && error.message) });
+            });
+          return function () {
+            alive = false;
+          };
+        },
+        [page.id, packageId]
+      );
+
+      const filtered = data.rows.filter(function (row) {
+        return (page.filters || []).every(function (f) {
+          const raw = values[f.field];
+          if (raw === undefined || raw === '') return true;
+          const cell = row[f.field];
+          if (f.kind === 'select') return String(cell) === String(raw);
+          return String(cell === undefined || cell === null ? '' : cell).indexOf(String(raw)) >= 0;
+        });
+      });
+      const sorted = sort.field
+        ? filtered.slice().sort(function (a, b) {
+            const x = a[sort.field];
+            const y = b[sort.field];
+            const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+            return sort.dir === 'asc' ? cmp : -cmp;
+          })
+        : filtered;
+      const current = picked ? data.rows.filter(function (r) { return keyOf(r, page) === picked; })[0] : null;
+
+      const columns = [
+        { key: 'osRowKey', label: '#', width: '6%', render: function (r) { return h('span', { className: 'os-mono os-muted' }, r.osRowKey); } },
+      ].concat(
+        (page.columns || []).map(function (c) {
+          return {
+            key: c.field,
+            label: c.label + (sort.field === c.field ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''),
+            render: function (r) {
+              const v = r[c.field];
+              const shown = v === undefined || v === null || v === '' ? '—' : String(v);
+              if (c.display === 'badge') return h(Badge, { tone: 'brand' }, shown);
+              return h('span', { className: c.type === 'number' || c.type === 'integer' ? 'os-mono' : '' }, shown);
+            },
+          };
+        })
+      );
+
+      const bar = h(
+        'div',
+        { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '10px 14px' } },
+        (page.filters || []).map(function (f) {
+          if (f.kind === 'select') {
+            return h(
+              'select',
+              {
+                key: f.field,
+                className: 'os-input',
+                style: { width: 140 },
+                value: values[f.field] || '',
+                onChange: function (e) {
+                  const next = Object.assign({}, values);
+                  next[f.field] = e.target.value;
+                  setValues(next);
+                },
+              },
+              h('option', { value: '' }, '全部' + f.label),
+              (f.options || []).map(function (o) {
+                return h('option', { key: o, value: o }, o);
+              })
+            );
+          }
+          return h('input', {
+            key: f.field,
+            className: 'os-input',
+            style: { width: 150 },
+            placeholder: f.label,
+            value: values[f.field] || '',
+            onChange: function (e) {
+              const next = Object.assign({}, values);
+              next[f.field] = e.target.value;
+              setValues(next);
+            },
+          });
+        }),
+        h('span', { className: 'os-muted', style: { fontSize: 12 } }, '匹配 ' + sorted.length + ' / ' + data.rows.length + ' 行')
+      );
+
+      if (data.phase === 'waiting') {
+        return h(Card, { title: '渲染预览 · ' + page.title, sub: '读取 ' + page.source + ' 的事实数据…' }, h('div', { className: 'os-card-b os-muted' }, '加载中…'));
+      }
+      if (data.phase === 'error') {
+        return h(
+          Card,
+          { title: '渲染预览 · ' + page.title, extra: h(Badge, { tone: 'warn' }, '读不到数据') },
+          h('div', { className: 'os-card-b os-muted' }, '没有读到 ' + page.source + ' 的事实数据：' + data.error + '。空列表不是「没有数据」，是「没读到」。')
+        );
+      }
+      if (!data.rows.length) {
+        return h(
+          Card,
+          { title: '渲染预览 · ' + page.title, sub: '来源对象 ' + page.source, extra: h(Badge, { tone: 'warn' }, '0 行') },
+          h('div', { className: 'os-card-b os-muted' }, '事实数据里 ' + page.source + ' 一行也没有，所以列表是空的。')
+        );
+      }
+
+      return h(
+        'div',
+        { className: 'os-grid' },
+        h(Card, { title: '渲染预览 · ' + page.title, sub: '来源对象 ' + page.source + '，读的是真实事实数据', extra: h(Badge, { tone: 'on' }, data.rows.length + ' 行'), flush: true }, bar, h(Table, { columns: columns, rows: sorted.map(function (r, i) { return Object.assign({ key: i, osRowKey: keyOf(r, page) }, r); }) })),
+        h(
+          'div',
+          { style: { display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 4px' } },
+          sorted.map(function (r) {
+            const id = keyOf(r, page);
+            return h(
+              'button',
+              {
+                key: id,
+                type: 'button',
+                className: 'os-btn' + (picked === id ? ' pri' : ''),
+                onClick: function () {
+                  setPicked(picked === id ? '' : id);
+                },
+              },
+              id
+            );
+          })
+        ),
+        current
+          ? h(
+              Card,
+              { title: '详情 · ' + keyOf(current, page), sub: '来自 detailFields', extra: h(Badge, { tone: 'brand' }, page.kind) },
+              h(
+                'div',
+                { className: 'os-card-b' },
+                (page.detailFields || []).map(function (f) {
+                  const v = current[f.field];
+                  return h(
+                    'div',
+                    { key: f.field, className: 'os-row', style: { padding: '4px 0' } },
+                    h('span', { className: 'os-muted', style: { width: 120, flex: 'none' } }, f.label),
+                    h('span', { className: 'os-mono os-grow' }, v === undefined || v === null || v === '' ? '—（空）' : String(v))
+                  );
+                })
+              )
+            )
+          : null,
+        (page.actions || []).length
+          ? h(
+              Card,
+              { title: '可用动作', sub: '由 action inputSchema 派生表单，执行走 Agent 审批闸门' },
+              h(
+                'div',
+                { className: 'os-card-b' },
+                page.actions.map(function (a) {
+                  return h(
+                    'div',
+                    { key: a.actionId, className: 'os-row', style: { padding: '4px 0', alignItems: 'flex-start' } },
+                    h('span', { style: { width: 130, flex: 'none' } }, h(Badge, { tone: a.approvalRequired ? 'warn' : 'on' }, a.approvalRequired ? '需审批' : '免审批')),
+                    h(
+                      'span',
+                      { className: 'os-grow' },
+                      h('span', { className: 'os-mono' }, a.actionId),
+                      h('span', { className: 'os-muted' }, '　表单字段：' + (a.form || []).map(function (f) { return f.field; }).join('、'))
+                    )
+                  );
+                })
+              ),
+              h('div', { className: 'os-note' }, '面板不直接执行动作：动作会改事实数据，执行要经过 Agent 的审批闸门。在对话里说「执行 adjustInventory」即可。')
+            )
+          : null
+      );
+    }
+
+    /** 行标识：优先用页面声明的主键，没有就按下标。 */
+    function keyOf(row, page) {
+      const keys = page.keyFields || [];
+      if (!keys.length) return String(row.__index === undefined ? '' : row.__index);
+      return keys.map(function (k) { return String(row[k] === undefined ? '' : row[k]); }).join(' / ');
+    }
+
     function AppLivePage(props) {
       const spec = props.model.appSpec;
+      const packageId = (spec.generatedFrom && spec.generatedFrom.packageId) || (props.model.pkg && props.model.pkg.id) || '';
       const [picked, setPicked] = useState((spec.pages[0] || {}).id || '');
       const page = spec.pages.filter(function (p) { return p.id === picked; })[0] || spec.pages[0];
       return h(
@@ -3287,6 +3509,7 @@ select.os-input{padding-right:4px}
               })
             )
           : null,
+        page ? h(AppPreview, { page: page, packageId: packageId }) : null,
         h(
           'div',
           { className: 'os-grid os-g2' },

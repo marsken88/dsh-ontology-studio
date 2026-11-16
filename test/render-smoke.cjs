@@ -210,7 +210,7 @@ const expectations = {
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行', 'CSV 数据源同步', 'demo.stock', '新增列 lead_time'],
   governance: ['变更历史', 'upsert_object', 'v1.1.0', '角色视角（视图）', 'store-manager', 'Inventory 4/8'],
   marketplace: ['资产市场', '会员权益资产包', '可安装'],
-  app: ['页面清单', '操作表单', 'adjustInventory'],
+  app: ['页面清单', '操作表单', 'adjustInventory', '渲染预览'],
   agent: ['Agent 花名册', 'stock-replenisher', '2 次'],
 };
 for (const p of Object.keys(expectations)) {
