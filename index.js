@@ -35,7 +35,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.51.0';
+const CODE_VERSION = '0.51.1';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1871,6 +1871,30 @@ export function apply(ctx, config = {}) {
         sampleLimit: { type: 'number', description: '抽样行数，默认 50，上限 200' },
       },
       required: ['path'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          rowCount: { type: 'number' },
+          object: { type: 'object' },
+          columns: { type: 'array' },
+          notes: { type: 'array' },
+        },
+        required: ['ok'],
+      },
+      render: (v) => {
+        if (!v || v.ok === false) return text(`未能生成草稿：${(v && v.problem) || '未知原因'}`);
+        const lines = [
+          `读入 ${v.rowCount} 行，抽样 ${v.sampled} 行，` + `推断出 ${v.columns.length} 列`,
+          `建议对象 ${v.object.id}（${v.object.name}），主键 ${v.object.keys.join(', ')}`,
+          `列与类型：${v.columns.map((c) => c.name + '→' + c.type).join(', ')}`,
+          `填充率低于 100% 的列：${v.columns.filter((c) => c.fillRate < 100).map((c) => c.name + ' ' + c.fillRate + '%').join(', ') || '无'}`,
+          ...(v.notes || []),
+        ];
+        return text(lines.filter(Boolean).join(`\n`));
+      },
     },
     async execute(args) {
       return draftFromCsvFile({

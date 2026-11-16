@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.51.0';
+    const CLIENT_VERSION = '0.51.1';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
