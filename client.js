@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.44.0';
+    const CLIENT_VERSION = '0.45.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -1658,8 +1658,29 @@ select.os-input{padding-right:4px}
       const [drag, setDrag] = useState(null);
       const [over, setOver] = useState(null);
       const [armed, setArmed] = useState(null);
+      const [armedLink, setArmedLink] = useState(null);
       const [notice, setNotice] = useState('');
       const svgRef = React.useRef(null);
+
+      const removeLink = function (id) {
+        if (armedLink !== id) {
+          setArmedLink(id);
+          setNotice('再点一次关系标签删除 ' + id + '。删关系不波及对象与动作。');
+          return;
+        }
+        setArmedLink(null);
+        setNotice('正在删除关系 ' + id + ' …');
+        post('/write/delete-link', { packageId: pkg.id, linkId: id })
+          .then(function (body) {
+            if (body && body.ok) {
+              setNotice('已删除关系 ' + id);
+              if (typeof props.onSaved === 'function') props.onSaved();
+              return;
+            }
+            setNotice('未删除：' + ((body && (body.message || body.error)) || '未知原因'));
+          })
+          .catch(function (e) { setNotice('未删除：' + String(e && e.message)); });
+      };
 
       const removeNode = function (id) {
         if (armed !== id) {
@@ -1847,8 +1868,13 @@ select.os-input{padding-right:4px}
                 h('text', {
                   x: e.mx, y: e.my - 4,
                   fontSize: '11', textAnchor: 'middle',
-                  fill: 'var(--dsw-alias-label-tertiary, #888)',
-                }, e.type)
+                  fill: armedLink === e.id ? 'var(--dsw-alias-state-error-primary, #d33)' : 'var(--dsw-alias-label-tertiary, #888)',
+                  style: { cursor: 'pointer' },
+                  onClick: function (event) {
+                    event.stopPropagation();
+                    removeLink(e.id);
+                  },
+                }, armedLink === e.id ? '确认删除 ' + e.type : e.type)
               );
             }),
             drag && drag.kind === 'link' && positions[drag.id]
