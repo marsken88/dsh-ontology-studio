@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.48.1';
+    const CLIENT_VERSION = '0.48.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3878,8 +3878,24 @@ select.os-input{padding-right:4px}
                 className: 'os-btn',
                 title: '回到对话窗口（审批在那里进行）',
                 onClick: function () {
-                  if (panelCtx && panelCtx.layout && typeof panelCtx.layout.selectPanel === 'function') {
-                    panelCtx.layout.selectPanel(null);
+                  const pick = function () {
+                    if (!panelCtx) return null;
+                    if (panelCtx.layout && typeof panelCtx.layout.selectPanel === 'function') return panelCtx.layout;
+                    if (typeof panelCtx.get === 'function') {
+                      const svc = panelCtx.get('layout');
+                      if (svc && typeof svc.selectPanel === 'function') return svc;
+                    }
+                    return null;
+                  };
+                  const svc = pick();
+                  if (!svc) {
+                    window.alert('拿不到切换面板的能力。请直接点左侧栏的会话条目回到对话。');
+                    return;
+                  }
+                  try {
+                    svc.selectPanel(null);
+                  } catch (err) {
+                    window.alert('回到对话失败：' + (err && err.message ? err.message : String(err)));
                   }
                 },
               },
@@ -3917,7 +3933,15 @@ select.os-input{padding-right:4px}
             ),
             h(
               'button',
-              { type: 'button', className: 'os-btn', onClick: reload, title: '重新读取宿主的资产、事实数据、历史、轨迹与市场' },
+              {
+                type: 'button',
+                className: 'os-btn',
+                title: '重新读取宿主的资产、事实数据、历史、轨迹与市场',
+                onClick: function () {
+                  reload();
+                  window.alert('已重新读取（' + new Date().toLocaleTimeString() + '）。数据没变时界面看起来一样，这是正常的。');
+                },
+              },
               '刷新'
             ),
             h(
