@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.36.1';
+    const CLIENT_VERSION = '0.37.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -58,16 +58,20 @@ window.__ModuleLoader__.load({
 .os-nav-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .os-rail-foot{padding:9px 14px;border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary)}
 .os-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
-.os-head{display:flex;align-items:flex-start;gap:14px;padding:16px 24px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.os-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;padding:16px 24px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .os-head-t{flex:1;min-width:0}
 .os-title{font-size:16px;font-weight:600;margin:0}
 .os-desc{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:2px}
 .os-body{flex:1 1 auto;min-height:0;overflow:auto;padding:18px 24px 48px}
+@media (max-width:980px){.os-body{padding:14px 14px 40px}.os-head{padding:14px 14px 12px}}
 .os-grid{display:grid;gap:12px}
-.os-g2{grid-template-columns:repeat(2,minmax(0,1fr))}
-.os-g3{grid-template-columns:repeat(3,minmax(0,1fr))}
-.os-g4{grid-template-columns:repeat(4,minmax(0,1fr))}
-.os-split{display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px;align-items:stretch}
+.os-g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.os-g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.os-g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.os-split{display:grid;grid-template-columns:minmax(180px,240px) minmax(0,1fr);gap:12px;align-items:stretch}
+@media (max-width:980px){.os-split{grid-template-columns:minmax(0,1fr)}}
+.os-tbl-wrap{overflow-x:auto}
+.os-tbl-wrap>.os-tbl{min-width:100%}
 .os-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
 .os-card-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .os-card-t{flex:1;min-width:0;font-size:12px;font-weight:600}
@@ -160,6 +164,9 @@ window.__ModuleLoader__.load({
 
     function Table(p) {
       return h(
+        'div',
+        { className: 'os-tbl-wrap' },
+        h(
         'table',
         { className: 'os-tbl' },
         h(
@@ -185,6 +192,7 @@ window.__ModuleLoader__.load({
               )
             )
           )
+        )
         )
       );
     }
