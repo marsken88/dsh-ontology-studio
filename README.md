@@ -121,7 +121,7 @@ ontology_list
 
 ## 工具速查
 
-28 个工具（19 读 / 9 写）。按用途分组，逐条说明见[架构文档](docs/architecture.md)。
+29 个工具（19 读 / 9 写）。按用途分组，逐条说明见[架构文档](docs/architecture.md)。
 - [scope-vs-plan.md](docs/scope-vs-plan.md) — 规划文档与实现的对照：已实现 / 半实现 / 未实现
 - [demo.md](docs/demo.md) — 五分钟演示脚本：点什么、说什么、应该看到什么
 

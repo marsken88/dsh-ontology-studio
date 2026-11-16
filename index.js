@@ -21,6 +21,7 @@ import { buildBrief } from './lib/context.mjs';
 import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { generateOpenApi } from './lib/openapi.mjs';
+import { draftFromCsvFile } from './lib/datasource.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -34,7 +35,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.50.1';
+const CODE_VERSION = '0.51.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1850,6 +1851,35 @@ export function apply(ctx, config = {}) {
         summary: describeDiff(diff),
         problems: saved.problems,
       };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_draft_from_csv  (read — 读 CSV 推断对象草稿)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_draft_from_csv',
+    description:
+      '数据源接入（CSV）：读一个本地 CSV 文件，按列抽样值推断类型（integer/number/boolean/date/datetime/string），生成本体对象草稿与列填充率。只读文件、只生成草稿、不写盘；确认后用 ontology_upsert_object 落库。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'CSV 文件路径（绝对或相对工作区）' },
+        objectId: { type: 'string', description: '对象 id，默认取文件名' },
+        name: { type: 'string', description: '对象中文名' },
+        keyColumns: { type: 'array', items: { type: 'string' }, description: '主键列名，默认第一列' },
+        sampleLimit: { type: 'number', description: '抽样行数，默认 50，上限 200' },
+      },
+      required: ['path'],
+    },
+    async execute(args) {
+      return draftFromCsvFile({
+        path: args.path,
+        objectId: args.objectId,
+        name: args.name,
+        keyColumns: args.keyColumns,
+        sampleLimit: args.sampleLimit,
+      });
     },
   });
 
