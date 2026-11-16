@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.38.0';
+    const CLIENT_VERSION = '0.39.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -874,6 +874,7 @@ select.os-input{padding-right:4px}
           label: '实时资产',
           readOnly: state.value ? state.value.readOnly === true : false,
           approval: state.value && state.value.approval ? state.value.approval : 'destructive',
+          hostVersion: (state.value && state.value.version) || null,
           traces: state.traces || [],
           records: state.records || null,
           history: state.history || [],
@@ -3690,6 +3691,18 @@ select.os-input{padding-right:4px}
               ? h(Badge, { tone: 'warn' }, model.approval === 'all' ? '写入需审批' : '删除/发布需审批')
               : null,
             model.problems.length ? h(Badge, { tone: 'err' }, model.problems.length + ' 个校验问题') : null,
+            model.live && model.hostVersion && model.hostVersion !== CLIENT_VERSION
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'os-btn',
+                    title: '宿主已加载新版本，面板还在用旧代码',
+                    onClick: function () { if (typeof location !== 'undefined' && location.reload) location.reload(); },
+                  },
+                  '宿主已更新到 v' + model.hostVersion + '，点此重载'
+                )
+              : null,
           ),
           h(
             'div',

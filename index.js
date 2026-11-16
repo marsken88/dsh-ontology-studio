@@ -33,7 +33,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.38.0';
+const CODE_VERSION = '0.39.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -209,6 +209,7 @@ export function apply(ctx, config = {}) {
     });
     registerRoutes(webCtx, {
       store,
+      version: CODE_VERSION,
       trace,
       history,
       panel,
