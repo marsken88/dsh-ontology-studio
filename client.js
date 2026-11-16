@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.48.4';
+    const CLIENT_VERSION = '0.49.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3998,11 +3998,19 @@ select.os-input{padding-right:4px}
       apply(ctx) {
         const slots = ctx.slots;
         const label = () => 'Ontology Studio';
-        panelCtx = ctx;
         const bind = function (run) {
           if (typeof ctx.effect === 'function') ctx.effect(run);
           else run();
         };
+        // layout / uiWorkspace 必须先 inject 声明，否则 Cordis 会抛
+        // "cannot get property X without inject"
+        bind(function () {
+          if (typeof ctx.inject !== 'function') return function () {};
+          return ctx.inject(['layout', 'uiWorkspace'], function (scoped) {
+            panelCtx = scoped;
+            return function () {};
+          });
+        });
         bind(function () {
           return slots.inject('main', function () {
             return slots.register({ name: 'main', key: PANEL_ID }, OntologyStudio);
