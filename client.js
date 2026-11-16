@@ -3652,7 +3652,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'os-body' },
-            h(PageBoundary, { page: page, key: page }, h(Body, { model: model }))
+            h(PageBoundary, { page: page, key: page }, h(Body, { model: model, onSaved: reload }))
           )
         )
       );
