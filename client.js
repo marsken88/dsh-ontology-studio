@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.37.1';
+    const CLIENT_VERSION = '0.37.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -77,6 +77,14 @@ window.__ModuleLoader__.load({
 .os-card-t{flex:1;min-width:0;font-size:12px;font-weight:600}
 .os-card-s{font-size:11px;color:var(--dsw-alias-label-secondary)}
 .os-card-b{padding:12px 14px}
+.os-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.os-field-l{font-size:11px;color:var(--dsw-alias-label-secondary)}
+.os-input{width:100%;box-sizing:border-box;height:30px;padding:0 8px;border-radius:7px;
+  border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);
+  color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}
+.os-input:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}
+select.os-input{padding-right:4px}
+.os-li{display:flex;align-items:center;gap:8px}
 .os-flush{padding:0}
 .os-kpi{font-size:22px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
 .os-kpi-l{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:1px}
@@ -1945,17 +1953,23 @@ window.__ModuleLoader__.load({
             { style: { padding: '4px 0 6px' } },
             objects.map((o) =>
               h(
-                'button',
+                'div',
                 {
                   key: o.id,
-                  type: 'button',
+                  role: 'button',
+                  tabIndex: 0,
                   className: 'os-li' + (o.id === sel ? ' on' : ''),
+                  style: { cursor: 'pointer' },
                   onClick: function () {
                     setSel(o.id);
                   },
                 },
-                h('div', { className: 'os-rowhead' }, h('span', { className: 'os-li-t' }, o.name), o.status === '草稿' ? h(Badge, { tone: 'warn' }, '草稿') : null),
-                h('div', { className: 'os-li-s' }, o.id + ' · ' + o.props.length + ' 属性'),
+                h(
+                  'div',
+                  { className: 'os-grow', style: { minWidth: 0 } },
+                  h('div', { className: 'os-rowhead' }, h('span', { className: 'os-li-t' }, o.name), o.status === '草稿' ? h(Badge, { tone: 'warn' }, '草稿') : null),
+                  h('div', { className: 'os-li-s' }, o.id + ' · ' + o.props.length + ' 属性')
+                ),
                 packageId
                   ? h(
                       'button',
