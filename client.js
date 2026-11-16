@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.39.0';
+    const CLIENT_VERSION = '0.39.1';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -41,8 +41,9 @@ window.__ModuleLoader__.load({
      * styles — theme tokens only, so light/dark follow the host
      * ------------------------------------------------------------------ */
     const CSS = `.os-graph, .os-graph * { user-select: none; -webkit-user-select: none; }
+.os-root *{box-sizing:border-box}
 
-.os-root{display:flex;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
+.os-root{box-sizing:border-box;display:flex;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
 .os-rail{flex:0 0 212px;min-width:0;display:flex;flex-direction:column;background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1)}
 .os-brand{display:flex;align-items:center;gap:9px;padding:14px 14px 8px}
 .os-mark{flex:none;width:26px;height:26px;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;display:flex;align-items:center;justify-content:center}
