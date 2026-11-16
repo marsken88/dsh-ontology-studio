@@ -17,6 +17,9 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'dsh-ontology-studio';
     const API_BASE = '/dsh-ontology-studio';
 
+    /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
+    const CLIENT_VERSION = '0.36.1';
+
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
      * because a validation failure is information the form has to show.
@@ -3569,7 +3572,7 @@ window.__ModuleLoader__.load({
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(Object.assign({ ts: Date.now(), href: typeof location !== 'undefined' ? location.pathname : '' }, payload)),
+          body: JSON.stringify(Object.assign({ ts: Date.now(), v: CLIENT_VERSION, href: typeof location !== 'undefined' ? location.pathname : '' }, payload)),
         }).catch(function () {});
       } catch (error) {
         /* reporting must never break rendering */

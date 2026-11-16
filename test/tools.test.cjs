@@ -197,6 +197,14 @@ function fakeContext(options = {}) {
     assert.equal(alt.registered.length, 28);
   });
 
+  await it('客户端版本常量与 package.json 一致', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const src = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8');
+    const m = /const CLIENT_VERSION = '([^']+)'/.exec(src);
+    assert.ok(m, 'client.js 里应有 CLIENT_VERSION 常量');
+    assert.equal(m[1], pkg.version, 'CLIENT_VERSION 与 package.json 不一致，发布前必须同步');
+  });
+
   await it('代码版本常量与 package.json 一致（防止发布时漏改）', async () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
     const src = fs.readFileSync(path.join(ROOT, 'index.js'), 'utf8');

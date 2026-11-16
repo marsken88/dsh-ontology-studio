@@ -33,7 +33,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.36.0';
+const CODE_VERSION = '0.36.1';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -952,6 +952,17 @@ export function apply(ctx, config = {}) {
       if (panel.enabled) {
         try {
           const reports = await panel.list(50);
+          const withVersion = reports.filter((r) => r && r.v);
+          if (withVersion.length) {
+            const latest = withVersion[0].v;
+            if (latest !== version) {
+              add('面板版本', 'warn', `面板跑的是 v${latest}，宿主是 v${version}：刷新页面（F5）即可`);
+            } else {
+              add('面板版本', 'ok', 'v' + latest);
+            }
+          } else {
+            add('面板版本', 'warn', '面板还没上报过版本（旧客户端缓存），刷新页面后可比对');
+          }
           const pageErrors = reports.filter((r) => r && r.phase === 'page-error');
           if (pageErrors.length) {
             const latest = pageErrors[0];
