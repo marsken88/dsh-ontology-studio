@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.37.3';
+    const CLIENT_VERSION = '0.37.4';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3677,6 +3677,12 @@ select.os-input{padding-right:4px}
             'header',
             { className: 'os-head' },
             h('div', { className: 'os-head-t' }, h('h1', { className: 'os-title' }, meta[0]), h('div', { className: 'os-desc' }, meta[1])),
+            h(
+              'button',
+              { type: 'button', className: 'os-btn', onClick: reload, title: '重新读取宿主的资产、事实数据、历史、轨迹与市场' },
+              '刷新'
+            ),
+            h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产'),
             pkgBadge,
             h(Badge, { tone: model.live ? 'on' : 'warn' }, model.label),
             model.readOnly ? h(Badge, { tone: 'warn' }, '只读模式') : null,
@@ -3684,12 +3690,6 @@ select.os-input{padding-right:4px}
               ? h(Badge, { tone: 'warn' }, model.approval === 'all' ? '写入需审批' : '删除/发布需审批')
               : null,
             model.problems.length ? h(Badge, { tone: 'err' }, model.problems.length + ' 个校验问题') : null,
-            h(
-              'button',
-              { type: 'button', className: 'os-btn', onClick: reload, title: '重新读取宿主的资产、事实数据、历史、轨迹与市场' },
-              '刷新'
-            ),
-            h('button', { type: 'button', className: 'os-btn pri', disabled: true }, '新建资产')
           ),
           h(
             'div',
