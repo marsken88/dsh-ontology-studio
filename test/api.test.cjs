@@ -386,14 +386,27 @@ async function call(route, url, method = 'GET', body) {
 
   console.log('\nGET /views');
 
-  await it('没有视图时返回空列表，但给出全量统计', async () => {
+  await it('随包资产带示例视图，覆盖与全量统计都能读出来', async () => {
     const res = await call(routes[0], `${PREFIX}/views?id=retail.store-inventory`);
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.equal(body.ok, true);
-    assert.deepEqual(body.value.views, []);
     assert.equal(body.value.total.objects, 6);
     assert.equal(body.value.total.properties, 28);
+    assert.equal(body.value.views.length, 1);
+    assert.equal(body.value.views[0].id, 'store-manager');
+  });
+
+  await it('没有视图的包返回空列表，但给出全量统计', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-noviews-'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), 'utf8'));
+    delete pkg.views;
+    fs.writeFileSync(path.join(dir, 'store-inventory.ir.json'), JSON.stringify(pkg, null, 2));
+    const alt = register(dir);
+    registerRoutes(alt.ctx, { store: createStore({ dir }), prefix: PREFIX });
+    const res = await call(alt.routes[0], `${PREFIX}/views?id=retail.store-inventory`);
+    assert.deepEqual(res.json().value.views, []);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   await it('有视图时返回覆盖情况，面板据此能说出差多少', async () => {

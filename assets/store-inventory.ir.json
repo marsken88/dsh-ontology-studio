@@ -590,5 +590,43 @@
       "evalTarget": "任务完成率 ≥ 90%"
     }
   ],
-  "extensions": {}
+  "extensions": {},
+  "views": [
+    {
+      "description": "门店店长：只看库存数量与商品，不暴露成本与供应商",
+      "id": "store-manager",
+      "name": "门店店长视角",
+      "objects": [
+        {
+          "objectId": "Inventory",
+          "properties": [
+            "storeId",
+            "skuId",
+            "onHandQty",
+            "availableQty",
+            "safetyStock",
+            "updatedAt"
+          ]
+        },
+        {
+          "objectId": "Product",
+          "properties": [
+            "productId",
+            "productName",
+            "category",
+            "brand"
+          ]
+        },
+        {
+          "objectId": "Store",
+          "properties": [
+            "storeId",
+            "storeName",
+            "city",
+            "format"
+          ]
+        }
+      ]
+    }
+  ]
 }

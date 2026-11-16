@@ -60,10 +60,10 @@ const EXEC = { agent: { id: 'test-agent' }, callId: 'call-1' };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'onto-views-'));
   const assetsDir = path.join(dir, 'assets');
   fs.mkdirSync(assetsDir, { recursive: true });
-  fs.copyFileSync(
-    path.join(ROOT, 'assets', 'store-inventory.ir.json'),
-    path.join(assetsDir, 'store-inventory.ir.json')
-  );
+  // 随包资产带了一个示例视图；这里从干净的一份开始，测试自己声明
+  const seed = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), 'utf8'));
+  delete seed.views;
+  fs.writeFileSync(path.join(assetsDir, 'store-inventory.ir.json'), JSON.stringify(seed, null, 2));
 
   const { ctx, registered } = fakeContext({ request: async () => 'allowed-once' });
   mod.apply(ctx, { assetsDir, trace: false, history: false });
@@ -227,6 +227,30 @@ const EXEC = { agent: { id: 'test-agent' }, callId: 'call-1' };
     const byName3 = Object.fromEntries(reg3.map((d) => [d.name, d]));
     const value = await byName3.ontology_upsert_view.execute({ packageId: PKG, view }, EXEC);
     assert.equal(value.ok, true);
+  });
+
+  await it('级联删对象会清理视图：剩下可见的对象，视图就缩小', async () => {
+    await byName.ontology_upsert_view.execute({ packageId: PKG, view }, EXEC);
+    const value = await byName.ontology_delete_object.execute(
+      { packageId: PKG, objectId: 'Product', cascade: true },
+      EXEC
+    );
+    assert.equal(value.ok, true, JSON.stringify(value.problems || []));
+    assert.equal(value.cascaded.views, 1, '应报告清理了 1 个视图');
+    const ir = JSON.parse(fs.readFileSync(path.join(assetsDir, 'store-inventory.ir.json'), 'utf8'));
+    const view2 = (ir.views || [])[0];
+    assert.equal(ir.views.length, 1);
+    assert.deepEqual(view2.objects.map((o) => o.objectId), ['Inventory'], 'Product 应从视图里消失');
+  });
+
+  await it('视图里的对象全被删掉时，视图本身也不留下', async () => {
+    const value = await byName.ontology_delete_object.execute(
+      { packageId: PKG, objectId: 'Inventory', cascade: true },
+      EXEC
+    );
+    assert.equal(value.ok, true, JSON.stringify(value.problems || []));
+    const ir = JSON.parse(fs.readFileSync(path.join(assetsDir, 'store-inventory.ir.json'), 'utf8'));
+    assert.deepEqual(ir.views || [], [], '空视图等于一个永远报错的视角，应当删掉');
   });
 
   fs.rmSync(dir, { recursive: true, force: true });

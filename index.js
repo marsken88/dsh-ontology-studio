@@ -23,7 +23,7 @@ import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { generateOpenApi } from './lib/openapi.mjs';
 import { draftFromCsvFile, packageFromDraft } from './lib/datasource.mjs';
 import { nextSyncState, syncFileName, describeSync } from './lib/sync.mjs';
-import { projectPackage, viewCoverage, describeView, viewsOf } from './lib/views.mjs';
+import { projectPackage, viewCoverage, describeView, viewsOf, trimViewsAfterObjectDelete } from './lib/views.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -37,7 +37,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.56.0';
+const CODE_VERSION = '0.56.1';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -2986,6 +2986,9 @@ export function apply(ctx, config = {}) {
         });
       }
 
+      // 视图也引用对象与属性：不清理的话，级联删除会把包弄成不合法
+      const trimmedViews = trimViewsAfterObjectDelete(ir, args.objectId);
+
       const check = validateIr(ir);
       if (!check.ok) {
         return { ok: false, objectId: args.objectId, version: ir.version, problems: check.problems, message: '删除会让本体包失效' };
@@ -2994,6 +2997,7 @@ export function apply(ctx, config = {}) {
         links: links.length,
         actions: droppedActions.length,
         policies: trimmedPolicies.length,
+        views: trimmedViews.length,
       };
       if (args.dryRun) {
         return { ok: true, objectId: args.objectId, version: ir.version, cascaded, message: 'dryRun：未写盘' };
