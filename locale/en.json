@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Ontology Studio",
-    "description": "Enterprise semantic modeling and Harness execution platform: eight studios under unified navigation over a demo store-product-inventory ontology, with ten agent-callable tools for read, write, validation, impact analysis, rule evaluation and execution traces; writes are gated by a readonly switch and human approval.",
+    "description": "Enterprise semantic modeling and Harness execution platform: nine pages under unified navigation, ontologies declared as IR and made validatable, diffable and installable; 28 agent-callable tools covering read/write, rule evaluation, action execution, asset registry and evaluation; objects, properties, relations and rules are editable in the panel, with a readonly switch and human approval gate on writes.",
     "detail": "docs/DETAIL.md"
   },
   "entry": {

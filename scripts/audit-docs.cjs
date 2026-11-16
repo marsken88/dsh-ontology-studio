@@ -61,6 +61,23 @@ if (!readme.includes(encodeURIComponent('≥').toLowerCase()) && !readme.include
   problems.push('README 缺 node engines 徽标');
 }
 
+/* ---------- 2b. 插件清单里的工具数 ---------- */
+// 用户装好后在插件页看到的就是这段文字，写错了会以为插件没更新。
+for (const f of ['locale/zh.json', 'locale/en.json']) {
+  const text = read(f);
+  const m = /(\d+)\s*(?:个[^\d]{0,12}工具|agent-callable)/.exec(text);
+  if (!m) continue;
+  const num = Number(m[1]);
+  if (num !== tools) problems.push(f + ': 写着 ' + num + ' 个工具，代码是 ' + tools);
+}
+
+/* ---------- 2c. 详情页的工具数 ---------- */
+for (const f of ['docs/DETAIL.md']) {
+  const text = read(f);
+  const m = /\*\*(\d+)\s*个\*\*/.exec(text);
+  if (m && Number(m[1]) !== tools) problems.push(f + ': 写着 ' + m[1] + ' 个工具，代码是 ' + tools);
+}
+
 /* ---------- 3. 徽标 ---------- */
 const badges = {
   test: /actions\/workflows\/test\.yml\/badge\.svg/,
