@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.48.2';
+    const CLIENT_VERSION = '0.48.3';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3894,6 +3894,7 @@ select.os-input{padding-right:4px}
                   }
                   try {
                     svc.selectPanel(null);
+                    window.alert('已调用 selectPanel(null)，如果没有切换说明 null 不是正确的面板 ID。');
                   } catch (err) {
                     window.alert('回到对话失败：' + (err && err.message ? err.message : String(err)));
                   }
@@ -3924,6 +3925,7 @@ select.os-input{padding-right:4px}
                   }
                   try {
                     svc.startSession();
+                    window.alert('已调用 startSession()，如果没有出现新会话说明需要传 workspaceId。');
                   } catch (err) {
                     window.alert('开新会话失败：' + (err && err.message ? err.message : String(err)));
                   }
