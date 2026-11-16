@@ -89,7 +89,18 @@ for (const [sel, n] of topCount) {
   if (n > 1) warnings.push(`${sel} 在顶层被定义了 ${n} 次（后者覆盖前者）`);
 }
 
-console.log('CSS 选择器 ' + new Set(rules.map((r) => r.sel)).size + ' 个 | 代码用到的 os-* 类 ' + used.size + ' 个');
+/* ---------- 检查：永远禁用的按钮 ---------- */
+// 踩过：顶栏「新建资产」写着 disabled: true 活了好几轮，看起来能点其实永远点不动。
+// 目前只允许市场页演示分支里的两个（宿主离线时才出现）；再多就是新的死按钮。
+const DISABLED_ALLOWED = 2;
+const disabledCount = (src.match(/disabled:\s*true/g) || []).length;
+if (disabledCount > DISABLED_ALLOWED) {
+  problems.push(
+    `client.js 里有 ${disabledCount} 个永远禁用的按钮（允许上限 ${DISABLED_ALLOWED}）：新加的请改成可用，或说明为什么必须是占位`
+  );
+}
+
+console.log('CSS 选择器 ' + new Set(rules.map((r) => r.sel)).size + ' 个 | 代码用到的 os-* 类 ' + used.size + ' 个 | 永久禁用按钮 ' + disabledCount + ' 个');
 if (problems.length) {
   console.log('\n❌ 缺定义 ' + problems.length + ' 处：');
   for (const p of problems) console.log('  - ' + p);
