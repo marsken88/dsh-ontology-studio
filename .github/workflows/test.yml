@@ -51,6 +51,9 @@ jobs:
       - name: Audit docs (links, badge, version, tool counts)
         run: npm run audit:docs
 
+      - name: Audit panel CSS (undefined classes, duplicate rules)
+        run: node scripts/audit-css.cjs
+
       - name: Validate the bundled assets
         run: |
           node --input-type=module -e "
