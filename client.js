@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.49.0';
+    const CLIENT_VERSION = '0.49.1';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -2057,8 +2057,20 @@ select.os-input{padding-right:4px}
             c4: isKey ? 'unique' : p.indexed ? 'index' : '—',
           });
         return Object.assign(base, {
-          c3: p.constraint || (p.required ? '必填，非空' : '可空'),
-          c4: p.required ? '可读写' : '只读',
+          c3:
+            view === '技术视角'
+              ? p.storage || '未声明'
+              : view === 'AI 视角'
+                ? p.constraint || '—'
+                : p.constraint || (p.required ? '必填，非空' : '可空'),
+          c4:
+            view === '技术视角'
+              ? p.indexed === true
+                ? '已建索引'
+                : '未声明'
+              : p.required
+                ? '可读写'
+                : '只读',
         });
       });
 
