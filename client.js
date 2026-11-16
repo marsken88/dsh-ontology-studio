@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.39.2';
+    const CLIENT_VERSION = '0.40.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -1789,6 +1789,9 @@ select.os-input{padding-right:4px}
               onMouseMove: onMove,
               onMouseUp: onUp,
               onMouseLeave: onUp,
+              onDoubleClick: function (event) {
+                if (event.target === event.currentTarget && typeof props.onNewNode === 'function') props.onNewNode();
+              },
             },
             h('defs', null,
               h('marker', { id: 'os-arrow', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' },
@@ -1914,6 +1917,10 @@ select.os-input{padding-right:4px}
           },
           onBack: function () {
             setView2('list');
+          },
+          onNewNode: function () {
+            setView2('list');
+            setEditing('new');
           },
         });
       }
