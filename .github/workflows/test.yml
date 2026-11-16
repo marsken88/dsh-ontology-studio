@@ -54,6 +54,9 @@ jobs:
       - name: Audit panel CSS (undefined classes, duplicate rules)
         run: node scripts/audit-css.cjs
 
+      - name: Audit front/back wiring
+        run: node scripts/audit-wiring.cjs
+
       - name: Validate the bundled assets
         run: |
           node --input-type=module -e "
