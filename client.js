@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.53.0';
+    const CLIENT_VERSION = '0.54.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -764,6 +764,9 @@ select.os-input{padding-right:4px}
                 get('/agents?id=' + encodeURIComponent(first.id)).catch(function () {
                   return { value: null };
                 }),
+                get('/sync').catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
@@ -773,6 +776,7 @@ select.os-input{padding-right:4px}
                 const appSpec = (both[4] && both[4].value) || null;
                 const harness = (both[5] && both[5].value) || null;
                 const agents = (both[6] && both[6].value) || null;
+                const sync = (both[7] && both[7].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -786,6 +790,7 @@ select.os-input{padding-right:4px}
                   appSpec: appSpec,
                   harness: harness,
                   agents: agents,
+                  sync: sync,
                 });
               });
             });
@@ -889,6 +894,7 @@ select.os-input{padding-right:4px}
           appSpec: state.appSpec || null,
           harness: state.harness || null,
           agents: state.agents || null,
+          sync: state.sync || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -2361,6 +2367,7 @@ select.os-input{padding-right:4px}
       const missing = coverage.filter(function (c) {
         return c.present === 0;
       });
+      const sync = model.sync;
 
       return h(
         'div',
@@ -2376,6 +2383,36 @@ select.os-input{padding-right:4px}
             label: '从未填充的属性',
             delta: current ? current.id + ' 的 ' + coverage.length + ' 个属性' : '—',
           })
+        ),
+        h(
+          Card,
+          {
+            title: 'CSV 数据源同步',
+            sub: sync && sync.count ? sync.count + ' 个数据源有同步记录' : '还没有 CSV 数据源接入',
+            flush: Boolean(sync && sync.count),
+            extra:
+              sync && sync.count
+                ? h(Badge, { tone: 'on' }, '真实同步记录')
+                : h(Badge, { tone: 'warn' }, '未接入'),
+          },
+          sync && sync.count
+            ? h(Table, {
+                columns: [
+                  { key: 'packageId', label: '资产包', render: (r) => h('span', { className: 'os-mono' }, r.packageId) },
+                  { key: 'objectId', label: '对象', render: (r) => h('span', { className: 'os-mono' }, r.objectId || '—') },
+                  { key: 'rowCount', label: '行数', width: '8%' },
+                  { key: 'runs', label: '同步次数', width: '9%' },
+                  { key: 'summary', label: '说明' },
+                ],
+                rows: sync.sources.map(function (s) {
+                  return Object.assign({ key: s.packageId }, s);
+                }),
+              })
+            : h(
+                'div',
+                { className: 'os-note' },
+                '还没有 CSV 数据源接入。让 Agent 用 ontology_package_from_csv 把一张 CSV 装成资产包，之后每次 ontology_sync_csv 都会在这里留下「上次同步时间、行数、和上次比变了什么」。'
+              )
         ),
         h(
           Card,
@@ -2401,7 +2438,7 @@ select.os-input{padding-right:4px}
           h(
             'div',
             { className: 'os-note', style: { marginTop: 10 } },
-            '这是示例事实数据，规则求值与动作执行都跑在它上面。真实数据源（同步型 / 联邦型）尚未接入，本页下方的「接入策略」仍是设计说明。'
+            '这是随包示例事实数据，规则求值与动作执行都跑在它上面。CSV 数据源可以接入，但目前只记录同步状态与列结构，行数据还没有落成本体事实；本页下方的「接入策略」仍是设计说明。'
           )
         ),
         h(

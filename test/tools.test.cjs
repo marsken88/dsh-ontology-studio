@@ -94,7 +94,7 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects, sections, listeners } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册二十九个工具', () => {
+  await it('apply 不抛错并注册全部三十二个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_agents',
@@ -122,6 +122,8 @@ function fakeContext(options = {}) {
       'ontology_publish',
       'ontology_records',
       'ontology_regression_plan',
+      'ontology_sync_csv',
+      'ontology_sync_status',
       'ontology_uninstall_asset',
       'ontology_upgrade',
       'ontology_upsert_link',
@@ -136,7 +138,7 @@ function fakeContext(options = {}) {
     for (const d of effects) assert.equal(typeof d, 'function');
   });
 
-  await it("writeMode: 'readonly' 时只注册二十个读工具", () => {
+  await it("writeMode: 'readonly' 时只注册二十一个读工具", () => {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, writeMode: 'readonly', trace: false });
     assert.deepEqual(alt.registered.map((d) => d.name).sort(), [
@@ -159,6 +161,7 @@ function fakeContext(options = {}) {
       'ontology_list',
       'ontology_records',
       'ontology_regression_plan',
+      'ontology_sync_status',
       'ontology_validate',
     ]);
   });
@@ -191,13 +194,13 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 30, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 32, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 30);
+    assert.equal(alt.registered.length, 32);
   });
 
   await it('客户端版本常量与 package.json 一致', () => {
@@ -259,7 +262,7 @@ function fakeContext(options = {}) {
     const writeCheck = value.checks.find((c) => c.name === '写入能力');
     assert.equal(writeCheck.status, 'warn');
     assert.ok(writeCheck.detail.includes('只读'));
-    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('20 个'));
+    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('21 个'));
   });
 
   await it('每个工具都有 parameters 与 output.schema/render', () => {
@@ -270,6 +273,20 @@ function fakeContext(options = {}) {
       assert.ok(def.output && def.output.schema, def.name + ' 缺少 output.schema');
       assert.equal(typeof def.output.render, 'function');
       assert.equal(typeof def.execute, 'function');
+    }
+  });
+
+  /**
+   * render 的真实签名是 (args, value)。写成 (v) 时 v 拿到的是 args：
+   * 每个字段都是 undefined，还可能因为读 args.columns.length 直接抛错。
+   * 形态检查比上线后再看出「undefined 行」快。
+   */
+  await it('每个工具 render 的签名是 (args, value)，不是单独的 (v)', () => {
+    for (const def of registered) {
+      assert.ok(
+        def.output.render.length >= 2,
+        def.name + ' 的 render 只声明了 ' + def.output.render.length + ' 个参数，应声明 (args, value)'
+      );
     }
   });
 

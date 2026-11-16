@@ -22,6 +22,7 @@ import { draftObjectFromTable, validateDraft } from './lib/reverse.mjs';
 import { objectSchema, packageSchemas, markdownDoc } from './lib/export.mjs';
 import { generateOpenApi } from './lib/openapi.mjs';
 import { draftFromCsvFile, packageFromDraft } from './lib/datasource.mjs';
+import { nextSyncState, syncFileName, describeSync } from './lib/sync.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -35,7 +36,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.53.0';
+const CODE_VERSION = '0.54.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -97,6 +98,20 @@ export function apply(ctx, config = {}) {
 
   /** Records file for rule evaluation: `<name>.ir.json` ↔ `<name>.records.json`. */
   const recordsFileFor = (assetsFile) => path.join(assetsDir, assetsFile.replace(/\.ir\.json$/, '.records.json'));
+
+  /**
+   * Sync state lives in a `<name>.sync.json` sidecar rather than inside the IR:
+   * it is provenance about a file on disk, not part of the ontology contract, and
+   * putting it in the IR would force every consumer to ignore an extra key.
+   */
+  async function readSyncState(assetsFile) {
+    try {
+      const text = await readFile(path.join(assetsDir, syncFileName(assetsFile)), 'utf8');
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
 
   /* ------------------------------------------------------------------ *
    * Context Engine: the ontology another agent already knows about.
@@ -339,6 +354,34 @@ export function apply(ctx, config = {}) {
       if (!outProps.etag) outProps.etag = { type: 'string' };
       if (!outProps.conflict) outProps.conflict = { type: 'boolean' };
     }
+
+    /**
+     * The approval gate is installed here, not left to each tool to remember.
+     *
+     * It used to be each tool's own job, and three of them (install / uninstall
+     * / package_from_csv) silently never asked: they were registered as writes,
+     * they wrote to disk, and no approval was ever requested. A tool that needs
+     * a different order — validate the input first, ask the human second — opts
+     * out with `gate: 'manual'` and calls gateWrite itself.
+     */
+    if (definition.gate !== 'manual') {
+      const inner = definition.execute;
+      const approvalOf = typeof definition.approval === 'function' ? definition.approval : () => ({});
+      definition.execute = async (args, exec) => {
+        const spec = (await approvalOf(args, exec)) || {};
+        const gate = await gateWrite(exec, {
+          toolName: definition.name,
+          destructive: spec.destructive === true,
+          dryRun: Boolean(args && args.dryRun === true),
+          reason: spec.reason || definition.description || definition.name,
+        });
+        if (!gate.allowed) {
+          return { ok: false, blocked: true, approval: gate.outcome, message: gate.message };
+        }
+        return inner(args, exec);
+      };
+    }
+
     register(definition);
   };
 
@@ -1310,6 +1353,10 @@ export function apply(ctx, config = {}) {
         return text(`未安装：${v.message || '未知原因'}`);
       },
     },
+    approval: (args) => ({
+      destructive: false,
+      reason: `安装资产包 ${args.packageId}（复制进资产目录）`,
+    }),
     execute: async (args) => {
       const result = await installAsset({ catalogDir, assetsDir: store.dir }, args.packageId);
       if (result.ok) await refreshBrief();
@@ -1343,6 +1390,10 @@ export function apply(ctx, config = {}) {
         return text(`未卸载：${v.message || '未知原因'}`);
       },
     },
+    approval: (args) => ({
+      destructive: true,
+      reason: `卸载资产包 ${args.packageId}（从资产目录删除）`,
+    }),
     execute: async (args) => {
       const result = await uninstallAsset({ catalogDir, assetsDir: store.dir }, args.packageId);
       if (result.ok) await refreshBrief();
@@ -1743,6 +1794,7 @@ export function apply(ctx, config = {}) {
   });
 
   registerWrite({
+    gate: 'manual', // 闸门顺序自定义（先校验再问人 / destructive 依赖动作策略）
     name: 'ontology_upgrade',
     description:
       '用资产市场里的同名包升级已安装的包：校验新版本后原位覆盖，并把 op=upgrade 记进变更历史。市场里没有同 id 的其它版本时拒绝。',
@@ -1882,21 +1934,28 @@ export function apply(ctx, config = {}) {
           file: { type: 'string' },
           etag: { type: 'string' },
           rowCount: { type: 'number' },
+          syncedAt: { type: 'string' },
           message: { type: 'string' },
         },
         required: ['ok'],
       },
-      render: (v) => {
+      render: (_args, value) => {
+        const v = value || {};
         if (!v || v.ok === false) return text('未安装：' + ((v && v.message) || '未知原因'));
         return text(
           [
             '已安装资产包 ' + v.packageId + '（' + v.rowCount + ' 行）',
             '文件：' + v.file,
+            v.syncedAt ? '已记录同步状态：' + String(v.syncedAt).replace('T', ' ').slice(0, 19) : '同步状态未写入',
             '状态是 draft，确认后用 ontology_publish 发布',
           ].join('\n')
         );
       },
     },
+    approval: (args) => ({
+      destructive: false,
+      reason: `从 CSV 生成并安装资产包 ${args.packageId}（源 ${args.path}）`,
+    }),
     async execute(args) {
       const draft = await draftFromCsvFile({ path: args.path, keyColumns: args.keyColumns });
       if (!draft.ok) return { ok: false, message: draft.problem || 'CSV 无法解析' };
@@ -1919,13 +1978,254 @@ export function apply(ctx, config = {}) {
       }
 
       const saved = await store.save(args.packageId + '.ir.json', built.ir, {});
+      if (saved.ok === false) {
+        return { ok: false, problems: saved.problems, message: '写入资产目录失败' };
+      }
+
+      // 首次接入就记一条同步状态：之后再读这个源，才知道「和上次比变了什么」
+      const synced = nextSyncState({
+        packageId: args.packageId,
+        path: draft.file,
+        draft,
+        objectId: draft.object.id,
+      });
+      let syncedAt = '';
+      if (synced.ok) {
+        const sidecar = await store.saveRecords(args.packageId + '.sync.json', synced.state);
+        syncedAt = sidecar.ok ? synced.state.at : '';
+      }
+
       return {
-        ok: saved.ok !== false,
+        ok: true,
         packageId: args.packageId,
         file: saved.file,
         etag: saved.etag,
         rowCount: draft.rowCount,
+        syncedAt,
         problems: saved.problems || [],
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_sync_csv  (write — 重新读源文件，记录与上次的差异)
+   * ------------------------------------------------------------------ */
+  registerWrite({
+    name: 'ontology_sync_csv',
+    description:
+      '重新读一次 CSV 源文件，记录同步状态（什么时候读的、多少行、和上次比变了什么），可选把新增列补成本体属性。只比内容指纹、行数增减和列结构变化，不做行级 diff——CSV 没有稳定主键顺序，逐行比对会给出似是而非的结论。会写盘，走人工审批。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '要从 CSV 同步的资产包 id' },
+        path: { type: 'string', description: 'CSV 路径，默认沿用上次记录的路径' },
+        objectId: { type: 'string', description: '承载列的对象，默认沿用上次记录' },
+        applySchema: {
+          type: 'boolean',
+          description: '为 true 时把新增列补成对象属性；消失的列只报告，不删属性（不静默丢数据）',
+        },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          packageId: { type: 'string' },
+          rowCount: { type: 'number' },
+          at: { type: 'string' },
+          runs: { type: 'number' },
+          summary: { type: 'string' },
+          added: { type: 'array' },
+          removed: { type: 'array' },
+          applied: { type: 'array' },
+          pending: { type: 'array' },
+          message: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v || v.ok === false) return text('未同步：' + ((v && v.message) || '未知原因'));
+        const lines = [
+          `${v.packageId} 第 ${v.runs} 次同步`,
+          v.summary,
+          v.added && v.added.length ? `新增列：${v.added.join('、')}` : '没有新增列',
+          v.removed && v.removed.length ? `源文件里已消失的列：${v.removed.join('、')}（属性保留，未删除）` : '',
+          v.applied && v.applied.length ? `已补成属性：${v.applied.join('、')}` : '',
+          v.pending && v.pending.length
+            ? `还没有对应的本体属性：${v.pending.join('、')}（加 applySchema 可补）`
+            : '',
+        ];
+        return text(lines.filter(Boolean).join('\n'));
+      },
+    },
+    approval: (args) => ({
+      destructive: args.applySchema === true,
+      reason:
+        `重新读 ${args.packageId} 的 CSV 源并记录同步状态` +
+        (args.applySchema ? '，并把新增列补成本体属性' : ''),
+    }),
+    async execute(args) {
+      const found = await store.get(args.packageId);
+      if (!found.entry || !found.entry.ir) {
+        return { ok: false, message: '资产包不存在：' + args.packageId };
+      }
+      const entry = found.entry;
+      const previous = await readSyncState(entry.file);
+
+      const source = args.path || (previous && previous.path) || '';
+      if (!source) {
+        return {
+          ok: false,
+          message: '这个包没有记录过 CSV 来源，请用 path 显式指定源文件（只有 ontology_package_from_csv 建的包自带来源）',
+        };
+      }
+
+      const draft = await draftFromCsvFile({ path: source });
+      if (!draft.ok) return { ok: false, message: draft.problem || 'CSV 无法解析' };
+
+      const objectId =
+        args.objectId ||
+        (previous && previous.objectId) ||
+        (entry.ir.objects.length === 1 ? entry.ir.objects[0].id : '');
+      if (!objectId) {
+        return { ok: false, message: '包里有多个对象，请用 objectId 指定这批列该落到哪个对象' };
+      }
+      const target = entry.ir.objects.find((o) => o.id === objectId);
+      if (!target) return { ok: false, message: '对象不存在：' + objectId };
+
+      const synced = nextSyncState({ packageId: args.packageId, path: source, draft, objectId, previous });
+      if (!synced.ok) return { ok: false, message: synced.problem };
+      const state = synced.state;
+
+      // 补列的判断依据是「本体里还没有这些列」，不是「本次同步新出现的列」：
+      // 上一次同步已经记录过的列，如果一直没补成属性，这一次仍然要能补上。
+      const takenNames = new Set(target.properties.map((p) => p.name));
+      const sourcedNames = new Set(target.properties.map((p) => p.storage).filter(Boolean));
+      const missingColumns = draft.columns.filter(
+        (c) => !takenNames.has(c.property) && !sourcedNames.has(c.name)
+      );
+
+      // 补列是可选的，并且只加不删：源文件里消失的列，属性留着比悄悄删掉安全
+      const applied = [];
+      const appliedColumns = new Set();
+      if (args.applySchema && missingColumns.length) {
+        const added = missingColumns;
+        const outcome = await store.update(entry.file, (ir) => {
+          const obj = ir.objects.find((o) => o.id === objectId);
+          if (!obj) return { problems: [{ path: '$.objects', code: 'no-object', message: '对象不存在：' + objectId }], ok: false };
+          const taken = new Set(obj.properties.map((p) => p.name));
+          for (const col of added) {
+            let name = col.property;
+            let n = 2;
+            while (taken.has(name)) name = col.property + n++; // 不覆盖同名属性
+            taken.add(name);
+            obj.properties.push({
+              name,
+              label: col.name,
+              type: col.type,
+              required: false,
+              storage: col.name,
+            });
+            applied.push(name);
+            appliedColumns.add(col.name);
+          }
+          return {};
+        });
+        if (outcome.ok === false) {
+          return { ok: false, problems: outcome.problems, message: '新增列没有通过整包校验，什么也没写' };
+        }
+      }
+
+      const sidecar = await store.saveRecords(syncFileName(entry.file), state);
+      return {
+        ok: sidecar.ok !== false,
+        packageId: args.packageId,
+        rowCount: state.rowCount,
+        at: state.at,
+        runs: state.runs,
+        summary: describeSync(state),
+        added: state.changes.added,
+        removed: state.changes.removed,
+        applied,
+        pending: missingColumns.filter((c) => !appliedColumns.has(c.name)).map((c) => c.name),
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_sync_status  (read — 数据源同步到哪一步了)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_sync_status',
+    description:
+      '查看数据源同步状态：哪些资产包是从 CSV 接进来的、上次什么时候读的、读到多少行、和上次比变了什么。只读，不写盘，不触发同步。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string', description: '只看一个包；省略则列出所有有同步记录的包' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          count: { type: 'number' },
+          entries: { type: 'array' },
+          summary: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (!v || v.ok === false) return text('未能读取同步状态');
+        if (!v.count) return text('还没有任何 CSV 同步记录。先用 ontology_package_from_csv 接入一个 CSV。');
+        const lines = v.entries.map((e) => `· ${e.packageId}　${e.summary}`);
+        return text([`${v.count} 个数据源有同步记录`, ...lines, '', v.summary].filter(Boolean).join('\n'));
+      },
+    },
+    async execute(args) {
+      const { entries } = await store.list();
+      const list = [];
+      let skipped = 0;
+
+      for (const entry of entries) {
+        if (!entry.ir) continue;
+        if (args.packageId && entry.ir.id !== args.packageId) continue;
+        const state = await readSyncState(entry.file);
+        if (!state) {
+          skipped += 1;
+          continue;
+        }
+        list.push({
+          packageId: entry.ir.id,
+          objectId: state.objectId || '',
+          path: state.path || '',
+          at: state.at || '',
+          rowCount: typeof state.rowCount === 'number' ? state.rowCount : 0,
+          columnCount: typeof state.columnCount === 'number' ? state.columnCount : 0,
+          runs: typeof state.runs === 'number' ? state.runs : 0,
+          summary: describeSync(state),
+        });
+      }
+
+      if (args.packageId && !list.length) {
+        return { ok: false, count: 0, entries: [], summary: '这个包没有同步记录（不是从 CSV 接入的）' };
+      }
+
+      const rows = list.reduce((n, e) => n + e.rowCount, 0);
+      return {
+        ok: true,
+        count: list.length,
+        entries: list,
+        summary: skipped
+          ? `${list.length} 个包有同步记录，另外 ${skipped} 个包没有（手工建的包不参与同步）`
+          : `${list.length} 个包有同步记录，合计 ${rows} 行`,
       };
     },
   });
@@ -1960,7 +2260,8 @@ export function apply(ctx, config = {}) {
         },
         required: ['ok'],
       },
-      render: (v) => {
+      render: (_args, value) => {
+        const v = value || {};
         if (!v || v.ok === false) return text(`未能生成草稿：${(v && v.problem) || '未知原因'}`);
         const lines = [
           `读入 ${v.rowCount} 行，抽样 ${v.sampled} 行，` + `推断出 ${v.columns.length} 列`,
@@ -2110,6 +2411,7 @@ export function apply(ctx, config = {}) {
    * ontology_upsert_object  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
+    gate: 'manual', // 闸门顺序自定义（先校验再问人 / destructive 依赖动作策略）
     name: 'ontology_upsert_object',
     description:
       '新增或替换本体包里的一个对象定义。写入前会校验整个包：结构或跨引用不成立就直接拒绝，并在磁盘上保持原样。传 dryRun 只预览不落盘。改完建议再跑 ontology_validate 与 ontology_impact。',
@@ -2243,6 +2545,7 @@ export function apply(ctx, config = {}) {
    * ontology_publish  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
+    gate: 'manual', // 闸门顺序自定义（先校验再问人 / destructive 依赖动作策略）
     name: 'ontology_publish',
     description:
       '发布一个本体包：校验必须全部通过，然后按 bump 递增版本号并把状态置为 published。校验失败则拒绝发布，磁盘保持原样。',
@@ -2320,6 +2623,7 @@ export function apply(ctx, config = {}) {
    * ontology_upsert_link  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
+    gate: 'manual', // 闸门顺序自定义（先校验再问人 / destructive 依赖动作策略）
     name: 'ontology_upsert_link',
     description:
       '新增或替换一条对象关系。两端对象必须已存在，写入前校验整包；不成立就拒绝且磁盘保持原样。传 dryRun 只预览。',
@@ -2406,6 +2710,7 @@ export function apply(ctx, config = {}) {
    * ontology_delete_link  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
+    gate: 'manual', // 闸门顺序自定义（先校验再问人 / destructive 依赖动作策略）
     name: 'ontology_delete_link',
     description: '删除一条对象关系。关系删掉不会波及对象与动作，仍会校验整包后写入。',
     parameters: {
@@ -2475,6 +2780,7 @@ export function apply(ctx, config = {}) {
    * ontology_delete_object  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
+    gate: 'manual', // 闸门顺序自定义（先校验再问人 / destructive 依赖动作策略）
     name: 'ontology_delete_object',
     description:
       '删除一个对象。它若被关系、动作或策略引用，默认拒绝并列出全部依赖；传 cascade 才会连带清理：删除相关关系、把它从动作的 writes 里摘掉（动作不再写任何对象则一并删除）、并清理指向被删动作的策略。删除前校验整包，不通过就拒绝且磁盘保持原样。',
@@ -2663,6 +2969,7 @@ export function apply(ctx, config = {}) {
    * ontology_execute_action  (write)
    * ------------------------------------------------------------------ */
   registerWrite({
+    gate: 'manual', // 闸门顺序自定义（先校验再问人 / destructive 依赖动作策略）
     name: 'ontology_execute_action',
     description:
       '执行本体里声明的业务动作：校验入参 → 按动作与策略判定是否需要审批 → 把声明式副作用应用到事实数据 → 用规则回验执行前后变化。只有同时声明 inputSchema 与 effect 的动作可以执行；其余会列出来并说明原因。传 dryRun 只预览不落盘。',

@@ -133,7 +133,7 @@ approval.request({ agent, toolName, callId, reason, displayReason, signal })
 dsh-ontology-studio/
 ├─ package.json            # bundle 清单：dsh.bundle.patch + dsh.client
 ├─ cordis.patch.yml        # 把插件行插入 profile 花名册
-├─ index.js                # 宿主半：28 个工具 + 读写 HTTP 路由 + 上下文注入
+├─ index.js                # 宿主半：32 个工具 + 读写 HTTP 路由 + 上下文注入
 ├─ lib/
 │  ├─ ir.mjs               # 校验器、统计、影响分析（纯函数，无依赖）
 │  ├─ expr.mjs / expr-lexer.mjs  # 规则表达式词法与递归下降求值（不用 eval）
@@ -153,6 +153,9 @@ dsh-ontology-studio/
 │  ├─ harness-check.mjs    # 作为 Agent 底座的六方面体检
 │  ├─ evals.mjs            # 规则评测运行与可比性判定
 │  ├─ focus.mjs            # 任务层聚焦打分
+│  ├─ openapi.mjs          # 本体 → OpenAPI 3.1（按主键生成路径参数）
+│  ├─ datasource.mjs       # CSV → 对象草稿 → 资产包 IR（纯函数，不写盘）
+│  ├─ sync.mjs             # 同步状态：内容指纹、列结构差异、人读的一句话
 │  └─ lint.mjs             # config.lintRules 团队约定
 ├─ USAGE.md                # 面向使用者的操作说明（面板怎么点、Agent 怎么说）
 ├─ client.js               # 浏览器半：主面板 + 侧栏入口 + 九个页面 + 三个编辑器
@@ -161,7 +164,7 @@ dsh-ontology-studio/
 │  ├─ store-inventory.ir.json      # 零售示例资产包
 │  └─ store-inventory.records.json # 示例事实数据（规则跑在它上面）
 ├─ catalog/                # 可安装但未加载的资产包（含同 id 的新版本）
-├─ test/                   # 26 个测试文件，npm test 依次跑
+├─ test/                   # 30 个测试文件 + 3 道审计，npm test 依次跑
 ├─ locale/{en,zh}.json     # 插件管理页的标题、描述、详情文档指向
 ├─ icon.svg
 └─ docs/
