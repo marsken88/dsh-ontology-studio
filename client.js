@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.42.0';
+    const CLIENT_VERSION = '0.43.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -1877,6 +1877,85 @@ select.os-input{padding-right:4px}
       );
     }
 
+
+    /** 两个只读检查：改这个对象要重验什么、和市场的版本差在哪。 */
+    function ChecksCard(props) {
+      const [plan, setPlan] = useState(null);
+      const [diff, setDiff] = useState(null);
+      const [busy, setBusy] = useState('');
+
+      const loadPlan = function () {
+        if (busy) return;
+        setBusy('plan');
+        get('/regression?id=' + encodeURIComponent(props.packageId) + '&object=' + encodeURIComponent(props.objectId))
+          .then(function (body) { setPlan((body && body.value) || { error: '没有返回' }); })
+          .catch(function (e) { setPlan({ error: String(e && e.message) }); })
+          .then(function () { setBusy(''); });
+      };
+
+      const loadDiff = function () {
+        if (busy) return;
+        setBusy('diff');
+        get('/diff?id=' + encodeURIComponent(props.packageId))
+          .then(function (body) { setDiff((body && body.value) || { available: false }); })
+          .catch(function (e) { setDiff({ available: false, message: String(e && e.message) }); })
+          .then(function () { setBusy(''); });
+      };
+
+      const planRows = (plan && plan.items) || [];
+      const d = diff && diff.diff;
+
+      return h(
+        Card,
+        {
+          title: '变更前检查',
+          sub: '两个只读分析：改这个对象要重验什么、和市场里的版本差在哪',
+          extra: h(
+            'div',
+            { style: { display: 'flex', gap: 6 } },
+            h('button', { type: 'button', className: 'os-btn', onClick: loadPlan, disabled: busy === 'plan' }, busy === 'plan' ? '读取中…' : '要重验什么'),
+            h('button', { type: 'button', className: 'os-btn', onClick: loadDiff, disabled: busy === 'diff' }, busy === 'diff' ? '读取中…' : '与市场版本对比')
+          ),
+          flush: true,
+        },
+        plan
+          ? plan.error
+            ? h('div', { className: 'os-card-b os-muted' }, plan.error)
+            : h(Table, {
+                columns: [
+                  { key: 'kind', label: '类别', width: '12%', render: function (r) { return h(Badge, { tone: 'brand' }, r.kind); } },
+                  { key: 'title', label: '要重验什么' },
+                  { key: 'how', label: '怎么验' },
+                ],
+                rows: planRows.map(function (it, i) { return { key: i, kind: it.kind, title: it.title, how: it.how === '—' ? '—' : it.how }; }),
+              })
+          : null,
+        diff
+          ? !diff.available
+            ? h('div', { className: 'os-card-b os-muted' }, diff.message || '没有其它版本')
+            : h(
+                'div',
+                { className: 'os-card-b' },
+                h('div', { className: 'os-mono', style: { marginBottom: 6 } }, 'v' + d.from.version + ' → v' + d.to.version + '：' + diff.summary),
+                (d.sections || [])
+                  .filter(function (sec) { return sec.added.length || sec.removed.length || sec.changed.length; })
+                  .map(function (sec) {
+                    return h(
+                      'div',
+                      { key: sec.collection, className: 'os-row' },
+                      h('span', { style: { width: 72, flex: 'none' } }, h(Badge, { tone: 'brand' }, sec.collection)),
+                      h('span', { className: 'os-grow os-muted' },
+                        (sec.added.length ? '新增 ' + sec.added.join(', ') + '；' : '') +
+                        (sec.removed.length ? '删除 ' + sec.removed.join(', ') + '；' : '') +
+                        (sec.changed.length ? '变更 ' + sec.changed.map(function (c) { return c.id; }).join(', ') : ''))
+                    );
+                  })
+              )
+          : null,
+        !plan && !diff ? h('div', { className: 'os-card-b os-muted' }, '点上面的按钮取结果。两项都是只读的，不会改任何数据。') : null
+      );
+    }
+
     function OntologyPage(props) {
       const model = props.model || buildModel({ phase: 'demo' });
       const objects = model.objects && model.objects.length ? model.objects : OBJECTS;
@@ -2031,6 +2110,7 @@ select.os-input{padding-right:4px}
           : h(
           'div',
           { className: 'os-grid' },
+          h(ChecksCard, { packageId: packageId, objectId: obj.id }),
           h(
             Card,
             {

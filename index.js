@@ -34,7 +34,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.42.0';
+const CODE_VERSION = '0.43.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -228,6 +228,21 @@ export function apply(ctx, config = {}) {
         return Object.assign({ packageId: id, available: true }, result);
       },
       // 只读：体检结果直接给面板，不走审批。
+      // 只读分析，都不写盘。
+      diff: async (id) => {
+        const { entry } = await store.get(id);
+        if (!entry || !entry.ir) return null;
+        const state = await catalogState({ catalogDir, assetsDir: store.dir });
+        const hit = state.available.find((e) => e.ir && e.ir.id === id && e.ir.version !== entry.ir.version);
+        if (!hit) return { available: false, message: `市场里没有 ${id} 的其它版本` };
+        const d = diffPackages(entry.ir, hit.ir);
+        return { available: true, diff: d, summary: describeDiff(d) };
+      },
+      regression: async (id, objectId) => {
+        const { entry } = await store.get(id);
+        if (!entry || !entry.ir) return null;
+        return buildRegressionPlan(entry.ir, objectId);
+      },
       harness: async (id) => {
         const { entry } = await store.get(id);
         if (!entry || !entry.ir) return null;
