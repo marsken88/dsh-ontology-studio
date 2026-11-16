@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const API_BASE = '/dsh-ontology-studio';
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
-    const CLIENT_VERSION = '0.43.0';
+    const CLIENT_VERSION = '0.44.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -1657,8 +1657,39 @@ select.os-input{padding-right:4px}
       // { kind: 'node'|'link', id, dx, dy, x, y }
       const [drag, setDrag] = useState(null);
       const [over, setOver] = useState(null);
+      const [armed, setArmed] = useState(null);
       const [notice, setNotice] = useState('');
       const svgRef = React.useRef(null);
+
+      const removeNode = function (id) {
+        if (armed !== id) {
+          setArmed(id);
+          setNotice('再点一次删除 ' + id + '。有引用时会被拒绝，并列出依赖。');
+          return;
+        }
+        setArmed(null);
+        setNotice('正在删除 ' + id + ' …');
+        post('/write/delete-object', { packageId: pkg.id, objectId: id })
+          .then(function (body) {
+            if (body && body.ok) {
+              setNotice('已删除 ' + id);
+              if (typeof props.onSaved === 'function') props.onSaved();
+              return;
+            }
+            if (body && body.error === 'has_dependents') {
+              const d = body.dependents || {};
+              setNotice(
+                '未删除：' + (d.links || 0) + ' 条关系' +
+                ((d.actions || []).length ? '、动作 ' + d.actions.join(', ') : '') +
+                ((d.agents || []).length ? '、Agent ' + d.agents.join(', ') : '') +
+                ' 引用它。要连带清理请到列表页的编辑界面里确认删除。'
+              );
+              return;
+            }
+            setNotice('未删除：' + ((body && (body.message || body.error)) || '未知原因'));
+          })
+          .catch(function (e) { setNotice('未删除：' + String(e && e.message)); });
+      };
 
       const persist = function (next) {
         try {
@@ -1859,6 +1890,22 @@ select.os-input{padding-right:4px}
                   style: { cursor: 'crosshair' },
                   onMouseDown: function (event) { startLinkDrag(event, o.id); },
                 }),
+                h(
+                  'text',
+                  {
+                    x: NODE_W - 10,
+                    y: 15,
+                    fontSize: '13',
+                    textAnchor: 'middle',
+                    fill: armed === o.id ? 'var(--dsw-alias-state-error-primary, #d33)' : 'var(--dsw-alias-label-tertiary, #999)',
+                    style: { cursor: 'pointer' },
+                    onClick: function (event) {
+                      event.stopPropagation();
+                      removeNode(o.id);
+                    },
+                  },
+                  armed === o.id ? '确认' : '×'
+                ),
                 // 6px 圆点既难点也难拖：上面盖一个透明的更大命中区
                 h('circle', {
                   cx: NODE_W,
