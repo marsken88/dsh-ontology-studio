@@ -328,6 +328,62 @@ async function call(route, url, method = 'GET', body) {
     assert.equal(res.json().error, 'internal');
   });
 
+  console.log('\nGET /sync');
+
+  await it('只列出有同步记录的包，并带上行数与说明', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-sync-'));
+    const pkg = {
+      irVersion: '1.0.0',
+      id: 'demo.stock',
+      name: '库存快照',
+      version: '0.1.0',
+      status: 'draft',
+      objects: [{ id: 'Stock', name: '库存', keys: ['storeId'], properties: [{ name: 'storeId', type: 'string' }] }],
+      links: [],
+      rules: [],
+      actions: [],
+    };
+    fs.writeFileSync(path.join(dir, 'demo.stock.ir.json'), JSON.stringify(pkg, null, 2));
+    fs.writeFileSync(
+      path.join(dir, 'demo.stock.sync.json'),
+      JSON.stringify({
+        packageId: 'demo.stock',
+        objectId: 'Stock',
+        path: 'D:/data/stock.csv',
+        at: '2026-11-16T09:00:00.000Z',
+        rowCount: 3,
+        columnCount: 2,
+        runs: 2,
+        columns: [],
+        changes: { first: false, dataChanged: true, rowDelta: 1, added: [], removed: [], typeChanged: [], schemaChanged: false },
+        previous: { at: '2026-11-15T09:00:00.000Z', hash: 'sha256-0000', rowCount: 2 },
+      })
+    );
+
+    const alt = register(dir);
+    registerRoutes(alt.ctx, { store: createStore({ dir }), prefix: PREFIX });
+    const res = await call(alt.routes[0], `${PREFIX}/sync`);
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.value.count, 1);
+    const source = body.value.sources[0];
+    assert.equal(source.packageId, 'demo.stock');
+    assert.equal(source.objectId, 'Stock');
+    assert.equal(source.rowCount, 3);
+    assert.equal(source.runs, 2);
+    assert.match(source.summary, /上次同步/);
+    assert.match(source.summary, /行数 \+1/);
+
+    // 过滤到一个没有同步记录的包：列出来是空，而不是编一条
+    fs.writeFileSync(path.join(dir, 'manual.ir.json'), JSON.stringify({ ...pkg, id: 'manual' }, null, 2));
+    const none = await call(alt.routes[0], `${PREFIX}/sync?id=manual`);
+    assert.equal(none.json().value.count, 0);
+    assert.deepEqual(none.json().value.sources, []);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   const total = pass + failures.length;
   console.log(`\n${pass}/${total} passed`);
   if (failures.length) {
