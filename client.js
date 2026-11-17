@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.60.2';
+    const CLIENT_VERSION = '0.60.3';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3270,20 +3270,30 @@ select.os-input{padding-right:4px}
           ? h(
               Card,
               { title: '调用明细', sub: '每个 Agent 实际调用了哪些工具、成功几次', flush: true },
-              h(Table, {
-                columns: [
-                  { key: 'agent', label: 'Agent' },
-                  { key: 'tool', label: '工具', render: function (r) { return h('span', { className: 'os-mono' }, r.tool); } },
-                  { key: 'ok', label: '成功', width: '10%' },
-                  { key: 'fail', label: '失败', width: '10%' },
-                ],
-                rows: roster.flatMap(function (a) {
+              (function () {
+                const detailRows = roster.flatMap(function (a) {
                   const per = (usage.byTool && usage.byTool[a.id]) || {};
                   return Object.keys(per).map(function (tool) {
                     return { key: a.id + ':' + tool, agent: a.name, tool: tool, ok: per[tool].ok, fail: per[tool].fail };
                   });
-                }),
-              })
+                });
+                if (!detailRows.length) {
+                  return h(
+                    'div',
+                    { className: 'os-card-b os-muted' },
+                    '还没有按 Agent 归因的调用。轨迹里的调用要么不是这些 Agent 发出的，要么还没发生——这一栏留空比编一行数据诚实。'
+                  );
+                }
+                return h(Table, {
+                  columns: [
+                    { key: 'agent', label: 'Agent' },
+                  { key: 'tool', label: '工具', render: function (r) { return h('span', { className: 'os-mono' }, r.tool); } },
+                    { key: 'ok', label: '成功', width: '10%' },
+                    { key: 'fail', label: '失败', width: '10%' },
+                  ],
+                  rows: detailRows,
+                });
+              })()
             )
           : null,
         h(
@@ -4108,7 +4118,7 @@ select.os-input{padding-right:4px}
           h(Stat, {
             value: summary && summary.topFailing.length ? String(summary.topFailing[0].fails) : '0',
             label: '最常失败',
-            delta: summary && summary.topFailing.length ? summary.topFailing.map(function (t) { return t.tool + ' ' + t.fails; }).join('、') : '没有失败记录',
+            delta: summary && summary.topFailing.length ? summary.topFailing.map(function (t) { return t.tool + ' ' + t.fails + ' 次'; }).join('、') : '没有失败记录',
           })
         ),
         h(

@@ -355,6 +355,25 @@ const otherJson = JSON.stringify(panel({}));
 if (!otherJson.includes('ticketId')) throw new Error('没有 Inventory 的包没有默认选中第一个对象');
 console.log('live other: ontology     ok');
 
+// 有 Agent 声明、但轨迹里没有它们的调用：调用明细要给空态，不能是一张只有表头的表。
+React.__setLive({
+  phase: 'live',
+  value: { dir: '<assets>', missingDir: false, packages: [{ id: ir.id, ok: true }], problems: [] },
+  file: '<assets>/store-inventory.ir.json',
+  ir,
+  error: null,
+  agents: {
+    agents: [{ id: 'quiet-agent', name: '安静 Agent', model: 'deepseek-v4.1-flash', status: 'published', usesObjects: ['Inventory'], tools: ['ontology_get'], actions: [] }],
+    usage: { byTool: {}, unattributed: 0, scanned: 0 },
+  },
+  appSpec: null, catalog: null, history: [], records: null,
+  sync: null, views: null, lineage: null, metrics: null, processPlans: null, traceSummary: null, traces: [],
+});
+React.__setPage('agent');
+const quietAgent = JSON.stringify(panel({}));
+if (!quietAgent.includes('还没有按 Agent 归因的调用')) throw new Error('Agent 页的调用明细缺少空态');
+console.log('live quiet: agent        ok');
+
 React.__setLive(null);
 
 React.__setLive({
