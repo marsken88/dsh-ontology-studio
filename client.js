@@ -19,7 +19,16 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.62.2';
+    const CLIENT_VERSION = '0.63.0';
+
+    /** GET helper: 只读接口，失败也返回 body（面板要把原因显示出来）。 */
+    function get(path) {
+      return fetch(API_BASE + path, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then(function (response) {
+        return response.json().catch(function () {
+          return { ok: false, message: 'HTTP ' + response.status };
+        });
+      });
+    }
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -881,6 +890,10 @@ select.os-input{padding-right:4px}
           required: p.required === true,
           source: p.source,
           note: p.description,
+          // 技术视角要的物理列与索引、AI 视角要的枚举，都在 IR 里，别丢
+          storage: p.storage,
+          indexed: p.indexed === true,
+          enum: Array.isArray(p.enum) ? p.enum : null,
           constraint: p.enum ? p.enum.join(' | ') : undefined,
         };
       });
@@ -2120,6 +2133,16 @@ select.os-input{padding-right:4px}
       };
       const obj = objects.filter((o) => o.id === sel)[0] || objects[0];
 
+      // 事实数据里这一列的第一个值——给 AI 视角当语义样例
+      const sampleOf = function (objectId, prop) {
+        const rec = model.records;
+        if (!rec || !Array.isArray(rec.objects)) return '—';
+        const hit = rec.objects.filter(function (o) { return o.id === objectId; })[0];
+        if (!hit || !Array.isArray(hit.sample) || !hit.sample.length) return '—';
+        const v = hit.sample[0][prop];
+        return v === undefined || v === null || v === '' ? '（空）' : String(v);
+      };
+
       const rows = obj.props.map((p) => {
         const isKey = obj.keys.indexOf(p.name) >= 0;
         const base = { key: p.name, name: p.name, label: p.label, type: p.type };
@@ -2129,24 +2152,17 @@ select.os-input{padding-right:4px}
           return Object.assign(base, { c3: isKey ? '是' : '否', c4: p.source || '—' });
         if (view === '技术视角')
           return Object.assign(base, {
-            c3: obj.table ? obj.table + '.' + p.name : p.source || '—',
-            c4: isKey ? 'unique' : p.indexed ? 'index' : '—',
+            c3: p.storage || '未声明',
+            c4: p.indexed ? '已建索引' : (isKey ? '主键，天然唯一' : '未建索引'),
           });
+        // AI 视角：语义约束 + 事实数据里的样例值（没有就写「—」，不编）
         return Object.assign(base, {
-          c3:
-            view === '技术视角'
-              ? p.storage || '未声明'
-              : view === 'AI 视角'
-                ? p.constraint || '—'
-                : p.constraint || (p.required ? '必填，非空' : '可空'),
-          c4:
-            view === '技术视角'
-              ? p.indexed === true
-                ? '已建索引'
-                : '未声明'
-              : p.required
-                ? '可读写'
-                : '只读',
+          c3: p.enum
+            ? '枚举：' + p.enum.join(' | ')
+            : p.required
+              ? '必填，非空'
+              : '可空',
+          c4: sampleOf(obj.id, p.name),
         });
       });
 
@@ -2172,7 +2188,7 @@ select.os-input{padding-right:4px}
           },
         });
       }
-      const c4 = { 业务视角: '必填', 数据视角: '来源字段', 技术视角: '索引', 'AI 视角': 'Agent 权限' }[view];
+      const c4 = { 业务视角: '必填', 数据视角: '来源字段', 技术视角: '索引', 'AI 视角': '样例值' }[view];
 
       return h(
         'div',
@@ -3921,6 +3937,11 @@ select.os-input{padding-right:4px}
             : h('div', { className: 'os-card-b os-muted' }, '还没有任何变更记录：这个包还没被改过。')
         ),
         viewsNote,
+        h(OpsActions, {
+          packageId: pkg.id,
+          objects: (pkg.objects || []).map(function (o) { return o.id; }),
+          onDone: function () { if (typeof props.onSaved === 'function') props.onSaved(); },
+        }),
         h(
           Notes,
           null,
@@ -4179,6 +4200,11 @@ select.os-input{padding-right:4px}
             })
           )
         ),
+        h(OpsActions, {
+          packageId: model.pkg ? model.pkg.id : '',
+          objects: (model.pkg && model.pkg.objects ? model.pkg.objects : []).map(function (o) { return o.id; }),
+          onDone: function () { if (typeof props.onSaved === 'function') props.onSaved(); },
+        }),
         h(
           Notes,
           null,
@@ -4341,6 +4367,108 @@ select.os-input{padding-right:4px}
       }
     }
 
+    /**
+     * 治理与可观测页的操作面板：发布、版本对比、回归清单、跑评测、看历次对比。
+     * 三个写操作都走面板写路由（人工操作，和编辑对象同一层级），不是 Agent 工具。
+     */
+    function OpsActions(props) {
+      const packageId = props.packageId;
+      const [busy, setBusy] = useState('');
+      const [result, setResult] = useState(null);
+      const objects = (props.objects || []).map(function (o) { return o.id; });
+      const [pick, setPick] = useState(objects[0] || '');
+
+      const run = function (label, promise) {
+        if (!packageId || busy) return;
+        setBusy(label);
+        setResult(null);
+        promise
+          .then(function (body) {
+            setBusy('');
+            setResult({ label: label, ok: body && body.ok !== false, body: body || {} });
+            if (props.onDone) props.onDone();
+          })
+          .catch(function (error) {
+            setBusy('');
+            setResult({ label: label, ok: false, body: { message: String(error && error.message) } });
+          });
+      };
+
+      const describe = function (r) {
+        if (!r) return null;
+        const b = r.body || {};
+        const v = b.value || {};
+        if (r.label === '版本对比') {
+          if (b.ok === false) return b.message || '没有可对比的版本';
+          return v.identical ? '与市场版本一致' : (v.summary || '有差异');
+        }
+        if (r.label === '回归清单') {
+          if (b.ok === false) return b.message || '取不到回归清单';
+          const plan = v.plan || v;
+          return plan && plan.items ? plan.items.length + ' 项要重验' : '已生成';
+        }
+        if (r.label === '发布') {
+          return b.ok ? '已发布 v' + b.from + ' → v' + b.to : (b.message || b.error || '未发布');
+        }
+        if (r.label === '跑一次评测') {
+          return b.ok ? '本次 ' + b.run.violations + ' 处违规（累计 ' + b.runs + ' 次运行）' : (b.message || '未跑成');
+        }
+        if (r.label === '历次对比') {
+          if (b.ok === false) return b.message || '取不到';
+          if (!v.runs || v.runs.length === 0) return '还没有评测记录';
+          if (!v.comparison) return '只有 1 次运行，无法对比';
+          return v.comparison.comparable
+            ? '违规 ' + v.comparison.before + ' → ' + v.comparison.after + '（' + (v.comparison.reason || '条件一致') + '）'
+            : '不可比：' + (v.comparison.reason || '条件不同');
+        }
+        return null;
+      };
+
+      return h(
+        Card,
+        {
+          title: '可以做什么',
+          sub: '面板写操作是人工操作（与编辑对象同一层级），不走 Agent 审批闸门',
+          extra: busy ? h(Badge, { tone: 'warn' }, busy + '…') : null,
+        },
+        h(
+          'div',
+          { className: 'os-card-b' },
+          h(
+            'div',
+            { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } },
+            h('button', { type: 'button', className: 'os-btn', onClick: function () { run('版本对比', get('/diff?id=' + encodeURIComponent(packageId))); } }, '与市场版本对比'),
+            h('button', { type: 'button', className: 'os-btn', onClick: function () { run('跑一次评测', post('/write/eval-run', { packageId: packageId })); } }, '跑一次评测'),
+            h('button', { type: 'button', className: 'os-btn', onClick: function () { run('历次对比', get('/evals?id=' + encodeURIComponent(packageId))); } }, '历次评测对比'),
+            h('button', { type: 'button', className: 'os-btn pri', onClick: function () { run('发布', post('/write/publish', { packageId: packageId })); } }, '发布当前版本'),
+            objects.length
+              ? h(
+                  'select',
+                  {
+                    className: 'os-input',
+                    style: { width: 150 },
+                    value: pick,
+                    onChange: function (e) { setPick(e.target.value); },
+                  },
+                  objects.map(function (id) { return h('option', { key: id, value: id }, id); })
+                )
+              : null,
+            objects.length
+              ? h('button', { type: 'button', className: 'os-btn', onClick: function () { run('回归清单', get('/regression?id=' + encodeURIComponent(packageId) + '&object=' + encodeURIComponent(pick))); } }, '这个对象的回归清单')
+              : null
+          ),
+          result
+            ? h(
+                'div',
+                { className: 'os-note', style: { marginTop: 8 } },
+                h(Badge, { tone: result.ok ? 'on' : 'err' }, result.label),
+                ' ' + (describe(result) || '完成')
+              )
+            : h('div', { className: 'os-note', style: { marginTop: 8 } }, '选一个操作，结果会显示在这里。')
+        )
+      );
+    }
+
     function OntologyStudio() {
       const [page, setPage] = useState('overview');
       const pair = useOntologyState();
@@ -4453,7 +4581,7 @@ select.os-input{padding-right:4px}
                       svc = panelCtx.uiWorkspace;
                       if (!svc && typeof panelCtx.get === 'function') svc = panelCtx.get('uiWorkspace');
                     }
-                    if (!svc || typeof svc.undefined !== 'function') {
+                    if (!svc || typeof svc.startSession !== 'function') {
                       console.warn('拿不到 uiWorkspace 服务，请用左侧栏操作');
                       return;
                     }
