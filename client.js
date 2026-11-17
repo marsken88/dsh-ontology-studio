@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.61.1';
+    const CLIENT_VERSION = '0.61.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -125,7 +125,7 @@ select.os-input{padding-right:4px}
 .os-loop-d{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:3px}
 .os-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:7px 0;border-bottom:1px dashed var(--dsw-alias-border-l1);font-size:12px}
 .os-row:last-child{border-bottom:0}
-.os-grow{flex:1;min-width:0}
+.os-grow{flex:1 1 160px;min-width:0}
 .os-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
 .os-muted{color:var(--dsw-alias-label-secondary)}
 .os-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-brand-primary);margin-top:7px}
