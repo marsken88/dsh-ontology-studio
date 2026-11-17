@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.62.1';
+    const CLIENT_VERSION = '0.62.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -75,7 +75,7 @@ window.__ModuleLoader__.load({
   .os-tbl td{display:flex;align-items:flex-start;gap:10px;padding:4px 0;border-bottom:0;width:auto !important;text-align:left}
   .os-tbl td::before{content:attr(data-label);flex:0 0 88px;color:var(--dsw-alias-label-secondary);font-size:11px}
   /* 卡片模式下值要能换行：长字段名（Inventory.availableQty）以前会被裁掉 */
-  .os-tbl td>*{min-width:0;overflow-wrap:anywhere}
+  .os-tbl td>*{min-width:0;overflow-wrap:break-word;word-break:normal}
   .os-tbl td:empty{display:none}
 }
 @container osroot (max-width:1040px){
