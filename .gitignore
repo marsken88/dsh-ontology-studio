@@ -15,3 +15,6 @@ docs/plan-source.md
 
 # 面板健康上报，不入库
 .ontology-panel.jsonl
+
+# 评测运行记录，不入库
+.ontology-evals.jsonl
