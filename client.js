@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.60.0';
+    const CLIENT_VERSION = '0.60.1';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -2388,10 +2388,24 @@ select.os-input{padding-right:4px}
       const model = props.model;
       const records = model.records;
       const objects = model.objects || [];
-      const withRows = records.objects.filter(function (o) {
-        return o.rows > 0;
-      });
+      // 连上宿主但这个包没有事实数据：说清楚，而不是退回演示数据源
+      const emptyRecords = !records || !records.objects;
+      const withRows = emptyRecords
+        ? []
+        : records.objects.filter(function (o) {
+            return o.rows > 0;
+          });
       const [picked, setPicked] = useState((withRows[0] || {}).id || '');
+
+      // 连上了但没有事实数据：明确说「没有」，不退回去显示演示数据源
+      if (emptyRecords) {
+        return h(
+          Card,
+          { title: '事实数据', sub: model.dir, extra: h(Badge, { tone: 'warn' }, '没有数据文件') },
+          h('div', { className: 'os-card-b os-muted' }, '已经连上宿主，但这个资产包没有事实数据文件（*.records.json）。规则与指标在这里算不出结果——不是 0，是没有数据。')
+        );
+      }
+
       const current = withRows.filter(function (o) {
         return o.id === picked;
       })[0] || withRows[0];
@@ -2548,7 +2562,7 @@ select.os-input{padding-right:4px}
       const model = (props && props.model) || buildModel({ phase: 'demo' });
       // Hook order must stay stable across live/demo switches.
       const [sel, setSel] = useState(0);
-      if (model.live && model.records && model.records.objects) return h(DataLivePage, { model: model });
+      if (model.live) return h(DataLivePage, { model: model });
       const src = SOURCES[sel];
       return h(
         'div',
@@ -3269,7 +3283,7 @@ select.os-input{padding-right:4px}
 
     function AgentPage(props) {
       const model = (props && props.model) || buildModel({ phase: 'demo' });
-      if (model.live && model.agents && (model.agents.agents || []).length) return h(AgentLivePage, { model: model });
+      if (model.live) return h(AgentLivePage, { model: model });
       return h(
         'div',
         { className: 'os-grid' },
@@ -3572,8 +3586,9 @@ select.os-input{padding-right:4px}
     function AppLivePage(props) {
       const spec = props.model.appSpec;
       const packageId = (spec.generatedFrom && spec.generatedFrom.packageId) || (props.model.pkg && props.model.pkg.id) || '';
-      const [picked, setPicked] = useState((spec.pages[0] || {}).id || '');
-      const page = spec.pages.filter(function (p) { return p.id === picked; })[0] || spec.pages[0];
+      const pages = spec.pages || [];
+      const [picked, setPicked] = useState((pages[0] || {}).id || '');
+      const page = pages.filter(function (p) { return p.id === picked; })[0] || pages[0];
       return h(
         'div',
         { className: 'os-grid' },
@@ -3684,7 +3699,7 @@ select.os-input{padding-right:4px}
 
     function AppPage(props) {
       const model = (props && props.model) || buildModel({ phase: 'demo' });
-      if (model.live && model.appSpec && (model.appSpec.pages || []).length) return h(AppLivePage, { model: model });
+      if (model.live && model.appSpec) return h(AppLivePage, { model: model });
       return h(
         'div',
         { className: 'os-grid' },
@@ -3872,7 +3887,8 @@ select.os-input{padding-right:4px}
     function GovernancePage(props) {
       const model = (props && props.model) || buildModel({ phase: 'demo' });
       const [tab, setTab] = useState('版本');
-      if (model.live && model.history && model.history.length) return h(GovernanceLivePage, { model: model });
+      // 连上宿主就用 live 页：历史为空是「还没改过」，不是「没有治理信息」
+      if (model.live) return h(GovernanceLivePage, { model: model });
       const body = {
         版本: h(Table, {
           columns: [

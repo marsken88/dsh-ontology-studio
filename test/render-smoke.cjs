@@ -275,6 +275,44 @@ for (const title of ['角色视角（视图）', '数据血缘']) {
   if (count > 1) throw new Error(`${title} 渲染了 ${count} 次`);
 }
 
+// 连上宿主、但实例是全新的：这几个页面必须渲染 live 空态，不能退回演示数据。
+React.__setLive({
+  phase: 'live',
+  value: { dir: '<assets>', missingDir: false, packages: [{ id: ir.id, ok: true }], problems: [] },
+  file: '<assets>/store-inventory.ir.json',
+  ir,
+  error: null,
+  agents: { agents: [], usage: { byTool: {}, unattributed: 0, scanned: 0 } },
+  appSpec: { appId: ir.id + '.app', title: ir.name, generatedFrom: { packageId: ir.id, version: ir.version }, objectCount: 0, pageCount: 0, pages: [], notes: [] },
+  catalog: { available: [], installed: [], missingDeps: [] },
+  history: [],
+  records: null,
+  sync: null,
+  views: { packageId: ir.id, views: [], total: { objects: 6, properties: 28 } },
+  lineage: null,
+  metrics: { packageId: ir.id, metrics: [], recordsFile: '' },
+  processPlans: { packageId: ir.id, plans: [] },
+  traceSummary: null,
+  traces: [],
+});
+
+// 正向断言就够：这些空态串只出现在 live 分支里，退回演示页时一个都不会出现。
+// （不做「不含演示数据」的反向断言：live 页的说明文字里本来就会提到这四个字。）
+const emptyExpect = {
+  governance: ['还没有任何变更记录'],
+  data: ['没有事实数据文件'],
+  agent: ['还没有声明任何 Agent'],
+  app: ['页面清单'],
+};
+for (const p of Object.keys(emptyExpect)) {
+  React.__setPage(p);
+  const json = JSON.stringify(panel({}));
+  for (const needle of emptyExpect[p]) {
+    if (!json.includes(needle)) throw new Error(`空实例的 ${p} 页缺少空态「${needle}」`);
+  }
+  console.log('live empty:', p.padEnd(12), 'ok');
+}
+
 React.__setLive(null);
 
 React.__setLive({
