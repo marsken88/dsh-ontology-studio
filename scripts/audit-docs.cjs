@@ -122,6 +122,32 @@ for (const name of toolNames) {
   if (!detailSrc.includes(name)) problems.push(`docs/DETAIL.md 没有介绍工具 ${name}`);
 }
 
+/* ---------- 8. 建模指南要覆盖每一种声明 ---------- */
+// schema 里能写的东西，建模指南就得讲怎么写。新增一种声明却忘了写，
+// 用户只能去翻 JSON Schema 或者源码。
+const schema = JSON.parse(fs.readFileSync(path.join(root, 'assets/ontology-ir.schema.json'), 'utf8'));
+const envelope = new Set(['irVersion', 'id', 'name', 'description', 'domain', 'version', 'owner', 'status', 'dependsOn', 'extensions']);
+const modelingSrc = fs.readFileSync(path.join(root, 'docs/modeling.md'), 'utf8');
+// 文档是中文的，用术语而不是英文 key 判断：每个声明至少要有一个说法出现
+const TERMS = {
+  objects: ['对象'],
+  links: ['关系'],
+  rules: ['规则'],
+  actions: ['动作'],
+  policies: ['策略'],
+  agents: ['Agent'],
+  views: ['视图'],
+  metrics: ['指标'],
+  processes: ['流程'],
+};
+for (const key of Object.keys(schema.properties || {})) {
+  if (envelope.has(key)) continue;
+  const terms = TERMS[key] || [key];
+  if (!terms.some((t) => modelingSrc.includes(t))) {
+    problems.push(`docs/modeling.md 没有讲怎么声明 ${key}（找不到任何一处「${terms.join(' / ')}」）`);
+  }
+}
+
 /* ---------- 输出 ---------- */
 console.log('检查文档：', docs.length, '个文件，本地链接', linkCount, '条');
 console.log('工具：', tools, '个（其中写工具', (indexSrc.match(/registerWrite\(\{/g) || []).length, '个）');

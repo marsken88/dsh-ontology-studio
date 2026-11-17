@@ -99,3 +99,109 @@ ontology_generate_app({ packageId, objects: ["Inventory"] })
 同一份 IR 生成**逐字相同**的规格，所以可以做快照对比——改一个属性，diff 里能直接看到多了一列。
 
 面板的「应用构建」页读这个规格并渲染成预览。**它不是可交互应用**：规格到组件还需要一个渲染器，这一步没做，也不假装做了。
+
+## 视图：声明「谁能看见什么」
+
+视图把「某类使用者能看见哪些对象的哪些属性」写成可校验的声明。
+
+```json
+{
+  "id": "store-manager",
+  "name": "门店店长视角",
+  "objects": [
+    { "objectId": "Inventory", "properties": ["storeId", "skuId", "availableQty", "safetyStock"] }
+  ]
+}
+```
+
+属性名必须真的存在，否则整包校验不过——「权限表」不会悄悄写进一个不存在的字段。
+声明之后 `ontology_get` 与 `ontology_export` 可以带 `view` 参数按视角裁剪；
+面板「治理中心」会列出每个视图覆盖了哪些对象、几个属性、漏了哪些。
+
+**它不是鉴权**：不传 `view` 的调用看到的仍是全量。裁剪只发生在输出层。
+
+## 指标口径：声明「怎么算一个数」
+
+规则判断一行合不合规，指标对一批行做聚合。
+
+```json
+{
+  "id": "inventory.stockoutCount",
+  "name": "缺货记录数",
+  "object": "Inventory",
+  "aggregation": "count",
+  "filter": "availableQty <= 0"
+}
+```
+
+聚合方式只有 `count | sum | avg | min | max`；除 `count` 外必须指定数值字段；
+`filter` 是可选表达式，标识符必须属于声明对象自己。
+
+结果永远带「多少行参与计算」：过滤没命中是 `0（0/5）`，对象没有数据是 `—（0/0）`。
+两者都显示 0 的话，一张空表会被读成业绩归零。没有时间窗口、没有多维下钻、没有同比环比。
+
+## 流程：声明步骤，再推演
+
+```json
+{
+  "id": "inventory.replenish",
+  "name": "缺货补货",
+  "steps": [
+    { "id": "check", "kind": "check", "metricId": "inventory.stockoutCount", "min": 1 },
+    { "id": "approve", "kind": "gate", "label": "店长确认补货量" },
+    { "id": "adjust", "kind": "action", "actionId": "adjustInventory",
+      "input": { "storeId": "S-0213", "skuId": "SKU-1002", "availableQty": 60 } }
+  ]
+}
+```
+
+步骤三类：`check`（查规则或指标）、`gate`（人工确认）、`action`（在副本上演算动作）。
+动作步骤是真的在副本上跑 `applyEffects` 的，所以后面的检查看到的是「如果前面执行了」的数据。
+
+**它不是工作流引擎**：没有持久化运行实例、没有定时/重试/补偿、不替人执行。
+真执行仍走 `ontology_execute_action`，一步一次审批。
+
+## 三种声明放在一起的样子
+
+一个完整的资产包通常长这样：对象与关系描述结构，规则与指标描述判断与度量，
+动作描述可执行的改动，策略描述审批要求，视图描述可见范围，流程把这些串成一条可推演的路径。
+每一层都可以单独校验，也可以单独导出。
+## 策略：把审批要求写进本体
+
+策略声明「哪些动作需要人工确认、哪些直接拒绝、哪些只记审计」。
+
+```json
+{
+  "id": "governance.approveTransfer",
+  "name": "调拨需人工审批",
+  "appliesTo": ["createTransfer"],
+  "effect": "require-approval"
+}
+```
+
+`effect` 只有三种：`require-approval`（执行前要人点一下）、`deny`（直接拒绝）、`audit-only`（放行但留痕）。
+`appliesTo` 必须指向已存在的动作，写错整包校验不过。
+
+策略和动作的 `approvalRequired: true` 是「或」的关系：任一条说要审批，就要审批。
+运行时判定在 `ontology_execute_action` 里，面板上看不到开关——这是有意为之，
+审批档位属于会话级配置，不在本体的可写范围内。
+
+## Agent 花名册：声明与证据分开
+
+本体包里可以声明「谁在用这个本体」，但**只声明依赖关系，不声明运行成绩**。
+
+```json
+{
+  "id": "stock-replenisher",
+  "name": "库存补货 Agent",
+  "usesObjects": ["Inventory", "Store"],
+  "tools": ["ontology_get", "ontology_evaluate_rules"],
+  "actions": ["adjustInventory"],
+  "evalTarget": "≥85%"
+}
+```
+
+调用次数、成功率这些运行数据来自执行轨迹（`.ontology-traces.jsonl`），不写进 IR。
+原因很直接：写进 IR 的成绩只能靠人填，而人填的成功率没有任何证据支撑。
+面板的「Agent & Harness」页把两边并排放：左边是声明，右边是真跑出来的数字，
+声明了却从未调用过的工具会明确标出来。
