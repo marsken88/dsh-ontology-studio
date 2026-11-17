@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.61.2';
+    const CLIENT_VERSION = '0.62.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -44,7 +44,7 @@ window.__ModuleLoader__.load({
     const CSS = `.os-graph, .os-graph * { user-select: none; -webkit-user-select: none; }
 .os-root *{box-sizing:border-box}
 
-.os-root{box-sizing:border-box;display:flex;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
+.os-root{container-type:inline-size;container-name:osroot;box-sizing:border-box;display:flex;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
 .os-rail{flex:0 0 212px;min-width:0;display:flex;flex-direction:column;background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1)}
 .os-brand{display:flex;align-items:center;gap:9px;padding:14px 14px 8px}
 .os-mark{flex:none;width:26px;height:26px;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;display:flex;align-items:center;justify-content:center}
@@ -59,24 +59,35 @@ window.__ModuleLoader__.load({
 .os-nav.on .os-nav-i{color:var(--dsw-alias-brand-primary)}
 .os-nav-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .os-rail-foot{padding:9px 14px;border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary)}
-.os-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+.os-main{container-type:inline-size;container-name:osmain;flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
 .os-head{display:flex;align-items:flex-start;gap:8px 12px;flex-wrap:wrap;padding:16px 24px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .os-head-t{flex:1 1 220px;min-width:0}
 .os-title{font-size:16px;font-weight:600;margin:0}
 .os-desc{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:2px}
 .os-body{flex:1 1 auto;min-height:0;overflow:auto;padding:18px 24px 48px}
-@media (max-width:1040px){
+@container osmain (max-width:760px){
+  /* 窄屏：表格降级成「一行一卡」，每格前面带列名，不再横向滚动 */
+  .os-tbl-wrap{overflow-x:visible}
+  .os-tbl{display:block}
+  .os-tbl thead{display:none}
+  .os-tbl tbody{display:block}
+  .os-tbl tr{display:block;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;margin:0 0 8px;padding:6px 10px;background:var(--dsw-alias-bg-base)}
+  .os-tbl td{display:flex;align-items:flex-start;gap:10px;padding:4px 0;border-bottom:0;width:auto !important;text-align:left}
+  .os-tbl td::before{content:attr(data-label);flex:0 0 88px;color:var(--dsw-alias-label-secondary);font-size:11px}
+  .os-tbl td:empty{display:none}
+}
+@container osroot (max-width:1040px){
   .os-rail{flex:0 0 168px}
   .os-body{padding:14px 16px 40px}
   .os-head{padding:14px 16px 12px}
 }
-@media (max-width:980px){.os-body{padding:14px 14px 40px}.os-head{padding:14px 14px 12px}}
+@container osmain (max-width:980px){.os-body{padding:14px 14px 40px}.os-head{padding:14px 14px 12px}}
 .os-grid{display:grid;gap:12px}
 .os-g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
 .os-g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
 .os-g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
 .os-split{display:grid;grid-template-columns:minmax(180px,240px) minmax(0,1fr);gap:12px;align-items:stretch}
-@media (max-width:980px){.os-split{grid-template-columns:minmax(0,1fr)}}
+@container osmain (max-width:980px){.os-split{grid-template-columns:minmax(0,1fr)}}
 .os-tbl-wrap{overflow-x:auto}
 .os-tbl-wrap>.os-tbl{min-width:100%}
 .os-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
@@ -210,7 +221,11 @@ select.os-input{padding-right:4px}
               'tr',
               { key: row.key == null ? i : row.key },
               p.columns.map((c) =>
-                h('td', { key: c.key }, c.render ? c.render(row) : String(row[c.key] == null ? '—' : row[c.key]))
+                h(
+                  'td',
+                  { key: c.key, 'data-label': c.label },
+                  c.render ? c.render(row) : String(row[c.key] == null ? '—' : row[c.key])
+                )
               )
             )
           )

@@ -32,9 +32,9 @@ const rules = [];
   for (let i = 0; i < css.length; i += 1) {
     const ch = css[i];
     if (ch === '{') {
-      const sel = buf.trim();
+      const sel = buf.replace(/\/\*[\s\S]*?\*\//g, '').trim();
       buf = '';
-      if (sel.startsWith('@media')) {
+      if (sel.startsWith('@media') || sel.startsWith('@container')) {
         depth += 1;
         mediaDepth = depth;
         continue;
