@@ -40,7 +40,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.59.2';
+const CODE_VERSION = '0.60.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -1401,13 +1401,19 @@ export function apply(ctx, config = {}) {
           packageId: { type: 'string' },
           version: { type: 'string' },
           file: { type: 'string' },
+          records: { type: 'string' },
           missing: { type: 'array' },
           message: { type: 'string' },
         },
       },
       render: (_args, value) => {
         const v = value || {};
-        if (v.ok) return text(`已安装 ${v.packageId} v${v.version} → ${v.file}`);
+        if (v.ok) {
+          return text(
+            `已安装 ${v.packageId} v${v.version} → ${v.file}` +
+              (v.records ? `\n示例数据：${v.records}` : '\n这个包不带示例数据')
+          );
+        }
         return text(`未安装：${v.message || '未知原因'}`);
       },
     },

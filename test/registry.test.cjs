@@ -67,7 +67,8 @@ async function loadTools(dir) {
 
   await it('列出可安装与已安装，并标注已装状态', async () => {
     const state = await catalogState({ catalogDir, assetsDir: tempAssets() });
-    assert.equal(state.available.length, 2, '市场里有会员包和库存包的 1.1.0');
+    // 不锁死条数：catalog 会随示例包增减，这里只要求这几件货在
+    assert.ok(state.available.length >= 2, '市场里至少有会员包和库存包的 1.1.0');
     const member = state.available.find((e) => e.ir.id === 'retail.member-loyalty');
     assert.equal(member.installed, false);
     const upgrade = state.available.find((e) => e.ir.id === 'retail.store-inventory');
@@ -153,6 +154,32 @@ async function loadTools(dir) {
 
   console.log('\n工具层');
 
+  await it('装包时把示例数据一起装上，卸载时一并清掉', async () => {
+    const { installAsset, uninstallAsset } = await import('../lib/registry.mjs');
+    const dir = tempAssets();
+    const installed = await installAsset({ catalogDir, assetsDir: dir }, 'retail.stock-control');
+    assert.equal(installed.ok, true, installed.message);
+    assert.ok(installed.records, '这个包自带示例数据，应一并装上');
+    assert.ok(fs.existsSync(installed.records), '示例数据文件应存在');
+    const rows = JSON.parse(fs.readFileSync(installed.records, 'utf8')).objects;
+    assert.equal(rows.ReplenishmentPlan.length, 3);
+    // 装进来的包能直接算出指标——这才说明示例数据真的跟着来了
+    const data = JSON.parse(fs.readFileSync(installed.file, 'utf8'));
+    assert.ok(data.metrics.length >= 1, '包应声明指标');
+
+    const removed = await uninstallAsset({ catalogDir, assetsDir: dir }, 'retail.stock-control');
+    assert.equal(removed.ok, true, removed.message);
+    assert.ok(!fs.existsSync(installed.records), '卸载后不应留下孤儿的示例数据文件');
+  });
+
+  await it('不带示例数据的包也能正常安装', async () => {
+    const { installAsset } = await import('../lib/registry.mjs');
+    const dir = tempAssets();
+    const installed = await installAsset({ catalogDir, assetsDir: dir }, 'retail.member-loyalty');
+    assert.equal(installed.ok, true, installed.message);
+    assert.equal(installed.records, null, '这个包没有示例数据，不该编一个');
+  });
+
   await it('三个工具注册，安装/卸载走同一套逻辑', async () => {
     const dir = tempAssets();
     const tools = await loadTools(dir);
@@ -161,7 +188,7 @@ async function loadTools(dir) {
     }
     const cat = await tools.ontology_asset_catalog.execute({}, {});
     assert.equal(cat.ok, true);
-    assert.equal(cat.available.length, 2);
+    assert.ok(cat.available.length >= 2);
     assert.ok(cat.available.every((a) => a.installed === false || a.upgradable === true));
 
     const install = await tools.ontology_install_asset.execute({ packageId: 'retail.member-loyalty' }, {});

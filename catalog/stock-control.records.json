@@ -1,0 +1,46 @@
+{
+  "objects": {
+    "ReplenishmentPlan": [
+      {
+        "planId": "RP-0001",
+        "skuId": "SKU-1001",
+        "storeId": "S-0213",
+        "suggestedQty": 40,
+        "status": "pending",
+        "createdAt": "2026-11-10"
+      },
+      {
+        "planId": "RP-0002",
+        "skuId": "SKU-1002",
+        "storeId": "S-0213",
+        "suggestedQty": 120,
+        "status": "pending",
+        "createdAt": "2026-11-11"
+      },
+      {
+        "planId": "RP-0003",
+        "skuId": "SKU-1001",
+        "storeId": "S-0188",
+        "suggestedQty": 60,
+        "status": "approved",
+        "createdAt": "2026-11-09"
+      }
+    ],
+    "StockoutEvent": [
+      {
+        "eventId": "SO-0001",
+        "skuId": "SKU-1002",
+        "storeId": "S-0213",
+        "occurredAt": "2026-11-09",
+        "lostSales": 12
+      },
+      {
+        "eventId": "SO-0002",
+        "skuId": "SKU-1001",
+        "storeId": "S-0188",
+        "occurredAt": "2026-11-08",
+        "lostSales": 3
+      }
+    ]
+  }
+}

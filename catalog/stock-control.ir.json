@@ -1,0 +1,282 @@
+{
+  "irVersion": "1.0.0",
+  "id": "retail.stock-control",
+  "name": "库存管控资产包",
+  "version": "0.1.0",
+  "status": "published",
+  "domain": "supply-chain",
+  "owner": "供应链数字化组",
+  "description": "补货计划与缺货事件的管控示例：一条规则、两个指标、一个视角、一个待审批流程。",
+  "dependsOn": [
+    "retail.store-inventory"
+  ],
+  "objects": [
+    {
+      "id": "ReplenishmentPlan",
+      "name": "补货计划",
+      "description": "待执行的补货建议",
+      "keys": [
+        "planId"
+      ],
+      "properties": [
+        {
+          "name": "planId",
+          "label": "计划编号",
+          "type": "string",
+          "storage": "replenishmentplan_snapshot.plan_id",
+          "required": true,
+          "indexed": true
+        },
+        {
+          "name": "skuId",
+          "label": "商品编号",
+          "type": "string",
+          "storage": "replenishmentplan_snapshot.sku_id",
+          "required": true,
+          "indexed": false
+        },
+        {
+          "name": "storeId",
+          "label": "门店编号",
+          "type": "string",
+          "storage": "replenishmentplan_snapshot.store_id",
+          "required": true,
+          "indexed": false
+        },
+        {
+          "name": "suggestedQty",
+          "label": "建议补货量",
+          "type": "number",
+          "storage": "replenishmentplan_snapshot.suggested_qty",
+          "required": true,
+          "indexed": false
+        },
+        {
+          "name": "status",
+          "label": "状态",
+          "type": "enum",
+          "storage": "replenishmentplan_snapshot.status",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "required": true,
+          "indexed": false
+        },
+        {
+          "name": "createdAt",
+          "label": "创建时间",
+          "type": "date",
+          "storage": "replenishmentplan_snapshot.created_at",
+          "required": false,
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "id": "StockoutEvent",
+      "name": "缺货事件",
+      "description": "一次缺货记录",
+      "keys": [
+        "eventId"
+      ],
+      "properties": [
+        {
+          "name": "eventId",
+          "label": "事件编号",
+          "type": "string",
+          "storage": "stockoutevent_snapshot.event_id",
+          "required": true,
+          "indexed": true
+        },
+        {
+          "name": "skuId",
+          "label": "商品编号",
+          "type": "string",
+          "storage": "stockoutevent_snapshot.sku_id",
+          "required": true,
+          "indexed": false
+        },
+        {
+          "name": "storeId",
+          "label": "门店编号",
+          "type": "string",
+          "storage": "stockoutevent_snapshot.store_id",
+          "required": true,
+          "indexed": false
+        },
+        {
+          "name": "occurredAt",
+          "label": "发生时间",
+          "type": "date",
+          "storage": "stockoutevent_snapshot.occurred_at",
+          "required": true,
+          "indexed": false
+        },
+        {
+          "name": "lostSales",
+          "label": "流失销量",
+          "type": "number",
+          "storage": "stockoutevent_snapshot.lost_sales",
+          "required": false,
+          "indexed": false
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "id": "plan_answers_event",
+      "source": "ReplenishmentPlan",
+      "target": "StockoutEvent",
+      "type": "answers",
+      "cardinality": "1:n"
+    }
+  ],
+  "rules": [
+    {
+      "id": "replenishment.overLimit",
+      "name": "建议补货量超上限",
+      "expression": "suggestedQty > 100",
+      "severity": "warn",
+      "enabled": true,
+      "owner": "供应链数字化组"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "replenishment.pendingCount",
+      "name": "待审计划数",
+      "description": "状态为 pending 的补货计划",
+      "object": "ReplenishmentPlan",
+      "aggregation": "count",
+      "filter": "status == 'pending'"
+    },
+    {
+      "id": "replenishment.pendingQty",
+      "name": "待审建议补货总量",
+      "object": "ReplenishmentPlan",
+      "aggregation": "sum",
+      "field": "suggestedQty"
+    }
+  ],
+  "actions": [
+    {
+      "id": "markPlanApproved",
+      "name": "标记补货计划已审批",
+      "approvalRequired": true,
+      "inputSchema": [
+        {
+          "name": "planId",
+          "label": "计划编号",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "status",
+          "label": "审批结果",
+          "type": "enum",
+          "enum": [
+            "approved",
+            "rejected"
+          ],
+          "required": true
+        }
+      ],
+      "writes": [
+        "ReplenishmentPlan"
+      ],
+      "effect": {
+        "object": "ReplenishmentPlan",
+        "matchKeys": [
+          {
+            "field": "planId",
+            "from": "planId"
+          }
+        ],
+        "set": {
+          "status": "status"
+        }
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "governance.approvePlan",
+      "name": "审批补货计划需人工确认",
+      "appliesTo": [
+        "markPlanApproved"
+      ],
+      "effect": "require-approval"
+    }
+  ],
+  "views": [
+    {
+      "id": "store-replenisher",
+      "name": "门店补货员视角",
+      "description": "只看计划与数量，不看审批结果之外的东西",
+      "objects": [
+        {
+          "objectId": "ReplenishmentPlan",
+          "properties": [
+            "planId",
+            "skuId",
+            "suggestedQty",
+            "status"
+          ]
+        }
+      ]
+    }
+  ],
+  "processes": [
+    {
+      "id": "replenishment.approve",
+      "name": "补货计划审批",
+      "description": "先确认有待审计划，再由人确认，最后标记审批结果",
+      "steps": [
+        {
+          "id": "check-pending",
+          "kind": "check",
+          "label": "确认有待审计划",
+          "metricId": "replenishment.pendingCount",
+          "min": 1
+        },
+        {
+          "id": "gate",
+          "kind": "gate",
+          "label": "店长确认补货量"
+        },
+        {
+          "id": "approve",
+          "kind": "action",
+          "label": "标记已审批",
+          "actionId": "markPlanApproved",
+          "input": {
+            "planId": "RP-0001",
+            "status": "approved"
+          }
+        }
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "id": "replenishment-planner",
+      "name": "补货计划助手",
+      "model": "deepseek-v4.1-flash",
+      "status": "draft",
+      "usesObjects": [
+        "ReplenishmentPlan"
+      ],
+      "tools": [
+        "ontology_get",
+        "ontology_metrics"
+      ],
+      "actions": [
+        "markPlanApproved"
+      ],
+      "evalTarget": "≥90%"
+    }
+  ]
+}
