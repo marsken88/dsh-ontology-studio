@@ -298,6 +298,50 @@ React.__setLive({
 
 // 正向断言就够：这些空态串只出现在 live 分支里，退回演示页时一个都不会出现。
 // （不做「不含演示数据」的反向断言：live 页的说明文字里本来就会提到这四个字。）
+// 九个页面在「连上了但什么都没有」时都要能渲染，且不能漏出内部值。
+// 这一轮要「真的一无所有」：包是空的、数据/历史/名册全没有。
+React.__setLive({
+  phase: 'live',
+  value: { dir: '<assets>', missingDir: false, packages: [{ id: 'demo.blank', ok: true }], problems: [] },
+  file: '<assets>/demo.blank.ir.json',
+  ir: { irVersion: '1.0.0', id: 'demo.blank', name: '空包', version: '0.1.0', status: 'draft', objects: [], links: [], rules: [], actions: [] },
+  error: null,
+  agents: { agents: [], usage: { byTool: {}, unattributed: 0, scanned: 0 } },
+  appSpec: { appId: 'x', title: 'x', generatedFrom: { packageId: 'demo.blank', version: '0.1.0' }, objectCount: 0, pageCount: 0, pages: [], notes: [] },
+  catalog: { available: [], installed: [], missingDeps: [] },
+  history: [],
+  records: null,
+  sync: null,
+  views: { packageId: 'demo.blank', views: [], total: { objects: 0, properties: 0 } },
+  lineage: null,
+  metrics: { packageId: 'demo.blank', metrics: [], recordsFile: '' },
+  processPlans: { packageId: 'demo.blank', plans: [] },
+  traceSummary: null,
+  traces: [],
+});
+// 签名标题取每页的英文名，只有该页会渲染它。
+const pageSignatures = {
+  overview: ['平台总览'],
+  ontology: ['还没有对象'],
+  data: ['没有事实数据文件'],
+  logic: ['业务规则'],
+  agent: ['还没有声明任何 Agent'],
+  app: ['页面清单'],
+  marketplace: ['资产市场'],
+  governance: ['还没有任何变更记录'],
+  observability: ['执行轨迹（实时）'],
+};
+for (const p of Object.keys(pageSignatures)) {
+  React.__setPage(p);
+  const json = JSON.stringify(panel({}));
+  if (!json.length) throw new Error(`空实例的 ${p} 页什么都没渲染`);
+  if (json.includes('undefined') || json.includes('NaN')) throw new Error(`空实例的 ${p} 页漏出了 undefined/NaN`);
+  for (const needle of pageSignatures[p]) {
+    if (!json.includes(needle)) throw new Error(`空实例的 ${p} 页缺少签名内容「${needle}」`);
+  }
+}
+console.log('live empty: 9 页签名       ok');
+
 const emptyExpect = {
   governance: ['还没有任何变更记录'],
   data: ['没有事实数据文件'],
