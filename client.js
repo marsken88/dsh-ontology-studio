@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.60.3';
+    const CLIENT_VERSION = '0.61.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -60,11 +60,16 @@ window.__ModuleLoader__.load({
 .os-nav-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .os-rail-foot{padding:9px 14px;border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary)}
 .os-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
-.os-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;padding:16px 24px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.os-head-t{flex:1;min-width:0}
+.os-head{display:flex;align-items:flex-start;gap:8px 12px;flex-wrap:wrap;padding:16px 24px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.os-head-t{flex:1 1 220px;min-width:0}
 .os-title{font-size:16px;font-weight:600;margin:0}
 .os-desc{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:2px}
 .os-body{flex:1 1 auto;min-height:0;overflow:auto;padding:18px 24px 48px}
+@media (max-width:1040px){
+  .os-rail{flex:0 0 168px}
+  .os-body{padding:14px 16px 40px}
+  .os-head{padding:14px 16px 12px}
+}
 @media (max-width:980px){.os-body{padding:14px 14px 40px}.os-head{padding:14px 14px 12px}}
 .os-grid{display:grid;gap:12px}
 .os-g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
@@ -76,7 +81,7 @@ window.__ModuleLoader__.load({
 .os-tbl-wrap>.os-tbl{min-width:100%}
 .os-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
 .os-card-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.os-card-t{flex:1;min-width:0;font-size:12px;font-weight:600;white-space:nowrap}
+.os-card-t{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;font-size:12px;font-weight:600;white-space:nowrap}
 .os-card-s{font-size:11px;color:var(--dsw-alias-label-secondary)}
 .os-card-b{padding:12px 14px}
 .os-field{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -4409,14 +4414,10 @@ select.os-input{padding-right:4px}
                       svc = panelCtx.layout;
                       if (!svc && typeof panelCtx.get === 'function') svc = panelCtx.get('layout');
                     }
-                    if (!svc || typeof svc.undefined !== 'function') {
-                      window.alert('拿不到 layout 服务。请用左侧栏操作。');
-                      return;
-                    }
+                    if (!svc || typeof svc.selectPanel !== 'function') return;
                     svc.selectPanel(null);
-                    window.alert('已调用 selectPanel(null)（若界面没变化，说明参数需要调整）');
                   } catch (err) {
-                    window.alert('layout 出错：' + (err && err.message ? err.message : String(err)));
+                    console.warn('layout 出错：', err);
                   }
                 },
               },
@@ -4436,13 +4437,13 @@ select.os-input{padding-right:4px}
                       if (!svc && typeof panelCtx.get === 'function') svc = panelCtx.get('uiWorkspace');
                     }
                     if (!svc || typeof svc.undefined !== 'function') {
-                      window.alert('拿不到 uiWorkspace 服务。请用左侧栏操作。');
+                      console.warn('拿不到 uiWorkspace 服务，请用左侧栏操作');
                       return;
                     }
                     svc.startSession();
-                    window.alert('已调用 startSession()（若界面没变化，说明参数需要调整）');
+
                   } catch (err) {
-                    window.alert('uiWorkspace 出错：' + (err && err.message ? err.message : String(err)));
+                    console.warn('uiWorkspace 出错：', err);
                   }
                 },
               },
@@ -4456,7 +4457,7 @@ select.os-input{padding-right:4px}
                 title: '重新读取宿主的资产、事实数据、历史、轨迹与市场',
                 onClick: function () {
                   reload();
-                  window.alert('已重新读取（' + new Date().toLocaleTimeString() + '）。数据没变时界面看起来一样，这是正常的。');
+
                 },
               },
               '刷新'
