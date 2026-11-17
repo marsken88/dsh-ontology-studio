@@ -313,6 +313,48 @@ for (const p of Object.keys(emptyExpect)) {
   console.log('live empty:', p.padEnd(12), 'ok');
 }
 
+// 包里一个对象都没有：本体模型页必须给空态，而不是退回演示对象、更不能崩。
+React.__setLive({
+  phase: 'live',
+  value: { dir: '<assets>', missingDir: false, packages: [{ id: 'demo.empty', ok: true }], problems: [] },
+  file: '<assets>/demo.empty.ir.json',
+  ir: { irVersion: '1.0.0', id: 'demo.empty', name: '空包', version: '0.1.0', status: 'draft', objects: [], links: [], rules: [], actions: [] },
+  error: null,
+  agents: null,
+  appSpec: null,
+  catalog: null,
+  history: [],
+  records: null,
+  sync: null,
+  views: null,
+  lineage: null,
+  metrics: null,
+  processPlans: null,
+  traceSummary: null,
+  traces: [],
+});
+React.__setPage('ontology');
+const emptyOntology = JSON.stringify(panel({}));
+if (!emptyOntology.includes('还没有对象')) throw new Error('空包的本体模型页缺少空态');
+if (emptyOntology.includes('商品') && emptyOntology.includes('供应商')) throw new Error('空包的本体模型页退回了演示对象');
+console.log('live empty: ontology     ok');
+
+// 没有 Inventory 的包：默认选中第一个对象，不能因为 id 不存在而空白。
+React.__setLive({
+  phase: 'live',
+  value: { dir: '<assets>', missingDir: false, packages: [{ id: 'demo.other', ok: true }], problems: [] },
+  file: '<assets>/demo.other.ir.json',
+  ir: { irVersion: '1.0.0', id: 'demo.other', name: '别的包', version: '0.1.0', status: 'draft',
+    objects: [{ id: 'Ticket', name: '工单', keys: ['ticketId'], properties: [{ name: 'ticketId', type: 'string' }, { name: 'status', type: 'string' }] }],
+    links: [], rules: [], actions: [] },
+  error: null, agents: null, appSpec: null, catalog: null, history: [], records: null,
+  sync: null, views: null, lineage: null, metrics: null, processPlans: null, traceSummary: null, traces: [],
+});
+React.__setPage('ontology');
+const otherJson = JSON.stringify(panel({}));
+if (!otherJson.includes('ticketId')) throw new Error('没有 Inventory 的包没有默认选中第一个对象');
+console.log('live other: ontology     ok');
+
 React.__setLive(null);
 
 React.__setLive({

@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.60.1';
+    const CLIENT_VERSION = '0.60.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -2073,12 +2073,25 @@ select.os-input{padding-right:4px}
 
     function OntologyPage(props) {
       const model = props.model || buildModel({ phase: 'demo' });
-      const objects = model.objects && model.objects.length ? model.objects : OBJECTS;
-      const [sel, setSel] = useState('Inventory');
+      // 连上宿主但没有对象：显示空态，不要退回演示对象；演示数据只给「没连上」用
+      const live = model.live === true;
+      const objects = model.objects && model.objects.length ? model.objects : live ? [] : OBJECTS;
+      // 默认选 Inventory（示例包的中心对象）；没有就选第一个——不要硬编码一个可能不存在的 id
+      const [sel, setSel] = useState((objects.filter((o) => o.id === 'Inventory')[0] || objects[0] || {}).id || '');
       const [view, setView] = useState(VIEWS[0]);
       const [editing, setEditing] = useState(null);
       const [view2, setView2] = useState('list');
       const packageId = model && model.pkg ? model.pkg.id : null;
+
+      if (!objects.length) {
+        return h(
+          Card,
+          { title: '对象清单', sub: model.dir || '', extra: h(Badge, { tone: 'warn' }, '0 个') },
+          h('div', { className: 'os-card-b os-muted' }, live
+            ? '这个资产包里还没有对象。新建一个，或者先跑 ontology_diagnostics 看资产是不是没通过校验。'
+            : '演示数据里应该有对象——没加载出来说明面板本身出了问题。')
+        );
+      }
       const reloadAfterWrite = function () {
         setEditing(null);
         if (typeof props.onSaved === 'function') props.onSaved();
