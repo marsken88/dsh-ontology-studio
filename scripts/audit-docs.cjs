@@ -148,6 +148,27 @@ for (const key of Object.keys(schema.properties || {})) {
   }
 }
 
+/* ---------- 9. 测试文档要覆盖每个测试文件，数字要对得上 ---------- */
+// 加了一个测试文件却在文档里不提，等于没加：读文档的人以为没测这件事。
+const testingSrc = fs.readFileSync(path.join(root, 'docs/testing.md'), 'utf8');
+const testDir = path.join(root, 'test');
+const testFiles = fs.readdirSync(testDir).filter((f) => f.endsWith('.test.cjs') || f === 'render-smoke.cjs');
+for (const f of testFiles) {
+  if (!testingSrc.includes(f)) problems.push(`docs/testing.md 没有提到 test/${f}`);
+}
+const chainGroups = (pkg.scripts.test.match(/node test\//g) || []).length;
+const claimedGroups = Number((testingSrc.match(/# (\d+) 组/) || [])[1]);
+if (Number.isFinite(claimedGroups) && claimedGroups !== chainGroups) {
+  problems.push(`docs/testing.md 说 ${claimedGroups} 组，npm test 实际跑 ${chainGroups} 个测试文件`);
+}
+const claimedItems = Number((testingSrc.match(/共 (\d+) 项断言/) || [])[1]);
+const tableItems = (testingSrc.match(/^\| `test\/[a-z0-9.-]+\.cjs` \| (\d+) 项/gm) || [])
+  .map((row) => Number(row.match(/(\d+) 项/)[1]))
+  .reduce((a, b) => a + b, 0);
+if (Number.isFinite(claimedItems) && claimedItems !== tableItems) {
+  problems.push(`docs/testing.md 说共 ${claimedItems} 项，表里加起来是 ${tableItems} 项`);
+}
+
 /* ---------- 输出 ---------- */
 console.log('检查文档：', docs.length, '个文件，本地链接', linkCount, '条');
 console.log('工具：', tools, '个（其中写工具', (indexSrc.match(/registerWrite\(\{/g) || []).length, '个）');

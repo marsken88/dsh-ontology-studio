@@ -85,6 +85,15 @@ dsh --profile <profile名> web
 
 装好后左侧栏会出现 **Ontology Studio** 入口。
 
+部署到实例之后想确认它真的对，跑一份只读验收（不改任何数据）：
+
+```bash
+node scripts/acceptance.mjs --base http://<host>:<port>
+```
+
+它会逐个打只读接口并核对不变量（版本、校验、指标参与行数、血缘分母、流程步骤数、轨迹摘要），
+失败时指出具体哪条对不上并以非零退出码结束——所以它也能拦住「部署了旧版本」。
+
 不需要手动编辑 profile 的 `cordis.patch.yml`——包里的 `dsh.bundle.patch` 会自动把插件行插进花名册，
 可以用 `dsh --profile <profile名> --dump-config` 核对（输出里会出现 `# == dsh-ontology-studio` 一段）。
 上面这条 `add link:` 流程已在 v0.59.2 上实测过一遍（干净 profile → 装上 → 配置里出现该插件层）。
