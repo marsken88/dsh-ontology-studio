@@ -26,6 +26,7 @@ import { nextSyncState, syncFileName, describeSync } from './lib/sync.mjs';
 import { projectPackage, viewCoverage, describeView, viewsOf, trimViewsAfterObjectDelete } from './lib/views.mjs';
 import { computeMetrics, describeResult, trimMetricsAfterObjectDelete } from './lib/metrics.mjs';
 import { planProcess, describeProcess, trimProcessesAfterObjectDelete } from './lib/process.mjs';
+import { buildLineage, describeLineage } from './lib/lineage.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -39,7 +40,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.58.0';
+const CODE_VERSION = '0.59.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -2441,6 +2442,80 @@ export function apply(ctx, config = {}) {
         count: plans.length,
         plans,
         summary: plans.map((p) => p.summary).join('；'),
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
+   * ontology_lineage  (read — 属性到物理列、到下游产物的血缘)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_lineage',
+    description:
+      '数据血缘：每个属性接到哪个物理列（storage），以及被哪些规则/指标/动作/视图/流程消费。重点报「断点」——没有物理列、却仍被下游读的属性：这类东西在真实数据上跑不起来，而面板上看起来一切正常。只读。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        objectId: { type: 'string', description: '可选：只看这一个对象的属性' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          coverage: { type: 'object' },
+          gaps: { type: 'array' },
+          orphans: { type: 'array' },
+          columns: { type: 'array' },
+          summary: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok === false) return text('未能构建血缘：' + (v.message || '未知原因'));
+        const out = [v.summary];
+        if (v.gaps && v.gaps.length) {
+          out.push('', '断点（没有物理列，但有人在读）：');
+          for (const gap of v.gaps) {
+            out.push(`· ${gap.objectId}.${gap.property} ← ${gap.usedBy.join('、')}`);
+          }
+        }
+        if (v.orphans && v.orphans.length) {
+          out.push('', '既没有物理列也没人读：' + v.orphans.map((o) => o.objectId + '.' + o.property).join('、'));
+        }
+        return text(out.join('\n'));
+      },
+    },
+    async execute(args) {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+
+      const ir = args.objectId
+        ? Object.assign({}, entry.ir, {
+            objects: (entry.ir.objects || []).filter((o) => o.id === args.objectId),
+          })
+        : entry.ir;
+      if (args.objectId && !ir.objects.length) {
+        return {
+          ok: false,
+          message: `对象不存在：${args.objectId}。可用对象：${(entry.ir.objects || []).map((o) => o.id).join('、')}`,
+        };
+      }
+
+      const lineage = buildLineage(ir);
+      return {
+        ok: true,
+        coverage: lineage.coverage,
+        gaps: lineage.gaps,
+        orphans: lineage.orphans,
+        columns: lineage.columns,
+        summary: describeLineage(lineage),
       };
     },
   });

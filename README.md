@@ -13,7 +13,7 @@
 
 本文的架构划分、八个 Studio 的职责边界与四阶段路线，依据内部的《Ontology Studio 平台建设规划：以 Harness 工程为核心》讨论稿整理。该文档属内部资料，不随本仓库分发（本地副本 `docs/plan-source.md` 已被 `.gitignore` 排除）。
 
-## 当前状态：v0.58
+## 当前状态：v0.59
 
 | 部分 | 状态 |
 | --- | --- |
@@ -121,7 +121,7 @@ ontology_list
 
 ## 工具速查
 
-36 个工具（23 读 / 13 写）。按用途分组，逐条说明见[架构文档](docs/architecture.md)。
+37 个工具（24 读 / 13 写）。按用途分组，逐条说明见[架构文档](docs/architecture.md)。
 - [scope-vs-plan.md](docs/scope-vs-plan.md) — 规划文档与实现的对照：已实现 / 半实现 / 未实现
 - [demo.md](docs/demo.md) — 五分钟演示脚本：点什么、说什么、应该看到什么
 

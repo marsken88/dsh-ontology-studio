@@ -495,6 +495,18 @@ async function call(route, url, method = 'GET', body) {
     assert.deepEqual(plan.steps.map((s) => s.verdict), ['pass', 'manual', 'would-run']);
   });
 
+  console.log("\nGET /lineage");
+
+  await it('血缘：覆盖率与断点', async () => {
+    const res = await call(routes[0], `${PREFIX}/lineage?id=retail.store-inventory`);
+    assert.equal(res.statusCode, 200);
+    const value = res.json().value;
+    assert.equal(value.coverage.total, 28);
+    assert.equal(value.coverage.mapped, 28);
+    assert.equal(value.coverage.percent, 100);
+    assert.deepEqual(value.gaps, []);
+    assert.equal(value.columns.length, 28);
+  });
   const total = pass + failures.length;
   console.log(`\n${pass}/${total} passed`);
   if (failures.length) {

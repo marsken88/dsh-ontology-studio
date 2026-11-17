@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.58.0';
+    const CLIENT_VERSION = '0.59.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -776,6 +776,9 @@ select.os-input{padding-right:4px}
                 get('/process-plan?id=' + encodeURIComponent(first.id)).catch(function () {
                   return { value: null };
                 }),
+                get('/lineage?id=' + encodeURIComponent(first.id)).catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
@@ -790,6 +793,7 @@ select.os-input{padding-right:4px}
                 const views = (both[8] && both[8].value) || null;
                 const metrics = (both[9] && both[9].value) || null;
                 const processPlans = (both[10] && both[10].value) || null;
+                const lineageValue = (both[11] && both[11].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -808,6 +812,7 @@ select.os-input{padding-right:4px}
                   views: views,
                   metrics: metrics,
                   processPlans: processPlans,
+                  lineage: lineageValue,
                 });
               });
             });
@@ -916,6 +921,7 @@ select.os-input{padding-right:4px}
           views: state.views || null,
           metrics: state.metrics || null,
           processPlans: state.processPlans || null,
+          lineage: state.lineage || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -3737,6 +3743,37 @@ select.os-input{padding-right:4px}
                 '属性名必须真的存在，否则整包校验不过。声明之后 ontology_get 带 view 参数就会按它裁剪。'
             )
       );
+      const lin = model.lineage || null;
+      const lineageCard = lin
+        ? h(
+            Card,
+            {
+              title: '数据血缘',
+              sub: lin.summary,
+              extra: h(Badge, { tone: lin.gaps && lin.gaps.length ? 'warn' : 'on' }, lin.gaps && lin.gaps.length ? lin.gaps.length + ' 处断点' : '无断点'),
+            },
+            h(
+              'div',
+              { className: 'os-card-b' },
+              lin.gaps && lin.gaps.length
+                ? h(Table, {
+                    columns: [
+                      { key: 'property', label: '属性', width: '30%', render: function (r) { return h('span', { className: 'os-mono' }, r.objectId + '.' + r.property); } },
+                      { key: 'usedBy', label: '谁在读它（但没有物理列）', render: function (r) { return h('span', { className: 'os-muted' }, r.usedBy.join('、')); } },
+                    ],
+                    rows: (lin.gaps || []).map(function (g) { return Object.assign({ key: g.objectId + '.' + g.property }, g); }),
+                  })
+                : h('div', { className: 'os-muted' }, '所有被消费的属性都接上了物理列。')
+            ),
+            h(
+              'div',
+              { className: 'os-note' },
+              '断点是这套东西真正有用的地方：面板上一切正常，但那条规则/指标在真实数据上取不到字段。覆盖率 ' +
+                (lin.coverage ? lin.coverage.percent + '%' : '—') +
+                '，未接物理列的属性 ' + (lin.coverage ? lin.coverage.unmapped : '—') + ' 个。'
+            )
+          )
+        : null;
       const viewsNote = h(
         Notes,
         null,
@@ -3776,7 +3813,7 @@ select.os-input{padding-right:4px}
           h(Stat, { value: String(viewList.length), label: '角色视角', delta: totalProps + ' 个属性中按视图裁剪' })
         ),
         viewsCard,
-        viewsCard,
+        lineageCard,
         h(
           Card,
           {

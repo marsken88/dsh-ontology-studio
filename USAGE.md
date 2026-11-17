@@ -27,7 +27,7 @@ DeepSeek Harness 左侧栏 → **Ontology Studio**。
 | Agent & Harness | 哪些 Agent 声明在用这个本体、调用成功率 |
 | 应用构建 | 由本体元数据生成的页面规格，**外加能筛选、能排序、能看详情的渲染预览** |
 | 资产市场 | 可安装 / 可升级的资产包 |
-| 治理中心 | 变更历史；**角色视角（视图）的覆盖情况** |
+| 治理中心 | 变更历史；**角色视角（视图）**；**数据血缘与断点** |
 | 可观测与评测 | 工具调用轨迹；**成功率 / 平均耗时 / P95 / 最常失败都是真算的** |
 
 ---
@@ -201,6 +201,39 @@ DeepSeek Harness 左侧栏 → **Ontology Studio**。
 - 不替人执行：动作步骤只在副本上演算，真执行仍走 `ontology_execute_action`，一步一次审批
 
 卡住时它会说清楚卡在第几步、为什么——这比“跑起来才发现”有用。
+
+---
+
+## 七、数据血缘：哪个属性其实没接上数据
+
+每个属性可以声明 `storage`（物理列/字段名）。血缘就是顺着这条线走：
+
+```
+物理列 ← 属性 ← 规则 / 指标 / 动作 / 视图 / 流程
+```
+
+让 Agent 说「看一下数据血缘」即可（`ontology_lineage`，只读），面板「治理中心」页有**数据血缘**卡片。
+
+它报三样东西：
+
+| 项 | 意思 |
+| --- | --- |
+| 覆盖率 | 多少个属性接上了物理列（28/28 = 100%） |
+| **断点** | 没有物理列、却仍被下游读的属性——**这类东西在真实数据上取不到字段** |
+| 孤立属性 | 既没物理列、也没人读（可能只是展示字段，不算问题） |
+
+断点是这套东西真正有用的地方。摘掉 `Inventory.availableQty` 的 `storage`，血缘立刻指出它下面挂着 8 个消费方：
+
+```
+Inventory.availableQty ← 规则 inventory.lowStockWarning、规则 inventory.stockoutAlert、
+                          指标 inventory.stockoutCount、指标 inventory.availableTotal、
+                          动作 adjustInventory、动作 createTransfer、
+                          视图 store-manager、流程 inventory.replenish
+```
+
+覆盖率 100% 只是一个数字；「哪条规则接不到真实数据」才是一个能去修的问题。
+
+边界：只读本体里的声明。不解析 SQL、不连数据库、不做跨系统的列级血缘。
 
 ---
 

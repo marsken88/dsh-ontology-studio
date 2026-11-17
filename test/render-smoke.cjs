@@ -155,6 +155,14 @@ React.__setLive({
     { ts: 1700000002000, packageId: ir.id, version: '1.1.0', op: 'upsert_object', target: 'Warehouse', summary: '新增对象 Warehouse' },
     { ts: 1700000001000, packageId: ir.id, version: '1.0.0', op: 'publish', target: ir.id, summary: '发布 1.0.0 → 1.1.0' },
   ],
+  lineage: {
+    packageId: ir.id,
+    summary: '28/28 个属性接上了物理列（100%），没有断点',
+    coverage: { total: 28, mapped: 28, unmapped: 0, percent: 100 },
+    gaps: [{ objectId: 'Inventory', property: 'availableQty', usedBy: ['规则 inventory.lowStockWarning'] }],
+    orphans: [],
+    columns: [],
+  },
   processPlans: {
     packageId: ir.id,
     plans: [
@@ -246,7 +254,7 @@ const expectations = {
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get', '成功率', '50%', '最常失败'],
   logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明', '在示例数据上跑一次', '+ 新增规则', '需审批', '指标口径', 'inventory.stockoutCount', '653', '业务流程（推演）', '缺货补货', '待人工确认'],
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行', 'CSV 数据源同步', 'demo.stock', '新增列 lead_time'],
-  governance: ['变更历史', 'upsert_object', 'v1.1.0', '角色视角（视图）', 'store-manager', 'Inventory 4/8'],
+  governance: ['变更历史', 'upsert_object', 'v1.1.0', '角色视角（视图）', 'store-manager', 'Inventory 4/8', '数据血缘', '1 处断点'],
   marketplace: ['资产市场', '会员权益资产包', '可安装'],
   app: ['页面清单', '操作表单', 'adjustInventory', '渲染预览'],
   agent: ['Agent 花名册', 'stock-replenisher', '2 次'],
@@ -259,6 +267,14 @@ for (const p of Object.keys(expectations)) {
   }
   console.log('live  :', p.padEnd(14), 'ok', (json.length / 1024).toFixed(1) + 'KB tree');
 }
+// 同一个卡片被插两次不会让上面的断言失败，只会让人看到重复内容；单独守一下。
+React.__setPage('governance');
+const govJson = JSON.stringify(panel({}));
+for (const title of ['角色视角（视图）', '数据血缘']) {
+  const count = govJson.split(title).length - 1;
+  if (count > 1) throw new Error(`${title} 渲染了 ${count} 次`);
+}
+
 React.__setLive(null);
 
 React.__setLive({
