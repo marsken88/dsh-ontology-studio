@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.61.0';
+    const CLIENT_VERSION = '0.61.1';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -81,7 +81,7 @@ window.__ModuleLoader__.load({
 .os-tbl-wrap>.os-tbl{min-width:100%}
 .os-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
 .os-card-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.os-card-t{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;font-size:12px;font-weight:600;white-space:nowrap}
+.os-card-t{overflow:hidden;text-overflow:ellipsis;flex:1 1 120px;min-width:0;font-size:12px;font-weight:600;white-space:nowrap}
 .os-card-s{font-size:11px;color:var(--dsw-alias-label-secondary)}
 .os-card-b{padding:12px 14px}
 .os-field{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -123,7 +123,7 @@ select.os-input{padding-right:4px}
 .os-loop-s{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2)}
 .os-loop-t{font-size:12px;font-weight:600}
 .os-loop-d{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:3px}
-.os-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed var(--dsw-alias-border-l1);font-size:12px}
+.os-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:7px 0;border-bottom:1px dashed var(--dsw-alias-border-l1);font-size:12px}
 .os-row:last-child{border-bottom:0}
 .os-grow{flex:1;min-width:0}
 .os-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
