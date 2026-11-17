@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.59.1';
+    const CLIENT_VERSION = '0.59.2';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -3519,7 +3519,7 @@ select.os-input{padding-right:4px}
         current
           ? h(
               Card,
-              { title: '详情 · ' + keyOf(current, page), sub: '来自 detailFields', extra: h(Badge, { tone: 'brand' }, page.kind) },
+              { title: '详情 · ' + keyOf(current, page), sub: '来自 detailFields', extra: h(Badge, { tone: 'brand' }, ({ list: '列表页', form: '表单页', detail: '详情页' })[page.kind] || page.kind) },
               h(
                 'div',
                 { className: 'os-card-b' },
