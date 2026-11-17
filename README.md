@@ -85,6 +85,10 @@ dsh --profile <profile名> web
 
 装好后左侧栏会出现 **Ontology Studio** 入口。
 
+不需要手动编辑 profile 的 `cordis.patch.yml`——包里的 `dsh.bundle.patch` 会自动把插件行插进花名册，
+可以用 `dsh --profile <profile名> --dump-config` 核对（输出里会出现 `# == dsh-ontology-studio` 一段）。
+上面这条 `add link:` 流程已在 v0.59.2 上实测过一遍（干净 profile → 装上 → 配置里出现该插件层）。
+
 两点必须知道：
 
 - **宿主半不会热重载**。改了 `index.js` 要先重启宿主；桌面版可以把插件开关关一次再打开，
