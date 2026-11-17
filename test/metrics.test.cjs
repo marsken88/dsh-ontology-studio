@@ -31,7 +31,12 @@ async function it(name, fn) {
   const { validateIr } = await import('../lib/ir.mjs');
 
   const base = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), 'utf8'));
-  const clone = () => JSON.parse(JSON.stringify(base));
+  // 指标用例会替换 metrics；随包流程引用的指标就没了，夹具里先摘掉流程，别自相矛盾
+  const clone = () => {
+    const copy = JSON.parse(JSON.stringify(base));
+    delete copy.processes;
+    return copy;
+  };
   const records = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.records.json'), 'utf8'));
 
   const metric = (patch) =>

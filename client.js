@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.57.0';
+    const CLIENT_VERSION = '0.58.0';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -773,6 +773,9 @@ select.os-input{padding-right:4px}
                 get('/metrics?id=' + encodeURIComponent(first.id)).catch(function () {
                   return { value: null };
                 }),
+                get('/process-plan?id=' + encodeURIComponent(first.id)).catch(function () {
+                  return { value: null };
+                }),
               ]).then(function (both) {
                 if (!alive) return;
                 const entries = (both[0] && both[0].value && both[0].value.entries) || [];
@@ -786,6 +789,7 @@ select.os-input{padding-right:4px}
                 const sync = (both[7] && both[7].value) || null;
                 const views = (both[8] && both[8].value) || null;
                 const metrics = (both[9] && both[9].value) || null;
+                const processPlans = (both[10] && both[10].value) || null;
                 setState({
                   phase: 'live',
                   value: value,
@@ -803,6 +807,7 @@ select.os-input{padding-right:4px}
                   sync: sync,
                   views: views,
                   metrics: metrics,
+                  processPlans: processPlans,
                 });
               });
             });
@@ -910,6 +915,7 @@ select.os-input{padding-right:4px}
           sync: state.sync || null,
           views: state.views || null,
           metrics: state.metrics || null,
+          processPlans: state.processPlans || null,
           dir: state.value ? state.value.dir : null,
           file: state.file,
           problems: problems,
@@ -2859,6 +2865,37 @@ select.os-input{padding-right:4px}
       };
       const enabledRules = data.rules.filter(function (r) { return r.enabled; }).length;
       const metricRows = (model.metrics && model.metrics.metrics) || [];
+      const planRows = (model.processPlans && model.processPlans.plans) || [];
+      const processCard = planRows.length
+        ? h(
+            Card,
+            {
+              title: '业务流程（推演）',
+              sub: '声明式步骤 + 在事实数据上推演；不是工作流引擎，动作不在这里执行',
+              extra: h(Badge, { tone: planRows.every(function (p) { return p.canRun; }) ? 'on' : 'warn' }, planRows.length + ' 个流程'),
+              flush: true,
+            },
+            h(Table, {
+              columns: [
+                { key: 'name', label: '流程', width: '18%', render: function (r) { return h('span', null, r.name || r.id); } },
+                { key: 'structure', label: '步骤', render: function (r) { return h('span', { className: 'os-muted' }, r.structure || '—'); } },
+                {
+                  key: 'verdict',
+                  label: '推演结果',
+                  width: '14%',
+                  render: function (r) {
+                    if (r.ok === false) return h(Badge, { tone: 'err' }, '声明有问题');
+                    if (r.blockedAt !== null) return h(Badge, { tone: 'err' }, '卡在第 ' + (r.blockedAt + 1) + ' 步');
+                    if (r.needsHuman) return h(Badge, { tone: 'warn' }, '待人工确认');
+                    return h(Badge, { tone: 'on' }, '可执行');
+                  },
+                },
+                { key: 'summary', label: '说明' },
+              ],
+              rows: planRows.map(function (p) { return Object.assign({ key: p.id }, p); }),
+            })
+          )
+        : null;
       const metricsCard = metricRows.length
         ? h(
             Card,
@@ -2922,6 +2959,7 @@ select.os-input{padding-right:4px}
           })
         ),
         metricsCard,
+        processCard,
         editing && packageId
           ? h(RuleEditor, {
               packageId: packageId,

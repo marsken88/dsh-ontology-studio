@@ -480,6 +480,21 @@ async function call(route, url, method = 'GET', body) {
     assert.equal(total.value, 653);
   });
 
+  console.log("\\nGET /process-plan");
+
+  await it('推演流程：步骤判定与结构都在', async () => {
+    const res = await call(routes[0], `${PREFIX}/process-plan?id=retail.store-inventory`);
+    assert.equal(res.statusCode, 200);
+    const value = res.json().value;
+    assert.equal(value.plans.length, 1);
+    const plan = value.plans[0];
+    assert.equal(plan.id, 'inventory.replenish');
+    assert.equal(plan.canRun, true);
+    assert.equal(plan.needsHuman, true);
+    assert.match(plan.structure, /人工确认/);
+    assert.deepEqual(plan.steps.map((s) => s.verdict), ['pass', 'manual', 'would-run']);
+  });
+
   const total = pass + failures.length;
   console.log(`\n${pass}/${total} passed`);
   if (failures.length) {

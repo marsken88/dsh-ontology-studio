@@ -94,7 +94,7 @@ function fakeContext(options = {}) {
   const { ctx, registered, effects, sections, listeners } = fakeContext();
   const config = { assetsDir: path.join(ROOT, 'assets'), trace: false };
 
-  await it('apply 不抛错并注册全部三十五个工具', () => {
+  await it('apply 不抛错并注册全部三十六个工具', () => {
     mod.apply(ctx, config);
     assert.deepEqual(registered.map((d) => d.name).sort(), [
       'ontology_agents',
@@ -121,6 +121,7 @@ function fakeContext(options = {}) {
       'ontology_list',
       'ontology_metrics',
       'ontology_package_from_csv',
+      'ontology_process_plan',
       'ontology_publish',
       'ontology_records',
       'ontology_regression_plan',
@@ -163,6 +164,7 @@ function fakeContext(options = {}) {
       'ontology_impact',
       'ontology_list',
       'ontology_metrics',
+      'ontology_process_plan',
       'ontology_records',
       'ontology_regression_plan',
       'ontology_sync_status',
@@ -198,13 +200,13 @@ function fakeContext(options = {}) {
     const alt = fakeContext();
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false, context: 'off' });
     assert.equal(alt.sections.length, 0);
-    assert.equal(alt.registered.length, 35, '工具仍应全部注册');
+    assert.equal(alt.registered.length, 36, '工具仍应全部注册');
   });
 
   await it('没有 systemPrompt 服务时插件照常工作', () => {
     const alt = fakeContext({ systemPrompt: false });
     mod.apply(alt.ctx, { assetsDir: config.assetsDir, trace: false });
-    assert.equal(alt.registered.length, 35);
+    assert.equal(alt.registered.length, 36);
   });
 
   await it('客户端版本常量与 package.json 一致', () => {
@@ -266,7 +268,7 @@ function fakeContext(options = {}) {
     const writeCheck = value.checks.find((c) => c.name === '写入能力');
     assert.equal(writeCheck.status, 'warn');
     assert.ok(writeCheck.detail.includes('只读'));
-    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('22 个'));
+    assert.ok(value.checks.find((c) => c.name === '工具注册').detail.includes('23 个'));
   });
 
   await it('每个工具都有 parameters 与 output.schema/render', () => {

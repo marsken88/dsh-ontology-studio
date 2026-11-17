@@ -652,5 +652,37 @@
       "aggregation": "avg",
       "field": "shelfLifeDays"
     }
+  ],
+  "processes": [
+    {
+      "id": "inventory.replenish",
+      "name": "缺货补货",
+      "description": "先确认确实有缺货，再由店长确认补货量，最后调整可售数量",
+      "steps": [
+        {
+          "id": "confirm-stockout",
+          "kind": "check",
+          "label": "确认存在缺货",
+          "metricId": "inventory.stockoutCount",
+          "min": 1
+        },
+        {
+          "id": "approve",
+          "kind": "gate",
+          "label": "店长确认补货量"
+        },
+        {
+          "id": "adjust",
+          "kind": "action",
+          "label": "调整可售数量",
+          "actionId": "adjustInventory",
+          "input": {
+            "storeId": "S-0213",
+            "skuId": "SKU-1002",
+            "availableQty": 60
+          }
+        }
+      ]
+    }
   ]
 }

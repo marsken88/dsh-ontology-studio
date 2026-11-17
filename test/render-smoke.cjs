@@ -155,6 +155,22 @@ React.__setLive({
     { ts: 1700000002000, packageId: ir.id, version: '1.1.0', op: 'upsert_object', target: 'Warehouse', summary: '新增对象 Warehouse' },
     { ts: 1700000001000, packageId: ir.id, version: '1.0.0', op: 'publish', target: ir.id, summary: '发布 1.0.0 → 1.1.0' },
   ],
+  processPlans: {
+    packageId: ir.id,
+    plans: [
+      {
+        id: 'inventory.replenish',
+        name: '缺货补货',
+        ok: true,
+        canRun: true,
+        needsHuman: true,
+        blockedAt: null,
+        structure: '检查(确认存在缺货) → 人工确认(店长确认补货量) → 执行(调整可售数量)',
+        summary: '3 步推演完毕：1 步通过，1 步会执行，1 步待人确认',
+        steps: [],
+      },
+    ],
+  },
   metrics: {
     packageId: ir.id,
     recordsFile: '<assets>/store-inventory.records.json',
@@ -228,7 +244,7 @@ const expectations = {
   overview: ['实时资产', ir.id, '刷新', '需要审批的动作'],
   ontology: ['Inventory', 'availableQty', 'belongsTo', '+ 新增关系', '+ 新建', '图谱', '要重验什么', '与市场版本对比'],
   observability: ['执行轨迹（实时）', 'ontology_list', 'ontology_get', '成功率', '50%', '最常失败'],
-  logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明', '在示例数据上跑一次', '+ 新增规则', '需审批', '指标口径', 'inventory.stockoutCount', '653'],
+  logic: ['inventory.lowStockWarning', 'availableQty < safetyStock', '仅声明', '在示例数据上跑一次', '+ 新增规则', '需审批', '指标口径', 'inventory.stockoutCount', '653', '业务流程（推演）', '缺货补货', '待人工确认'],
   data: ['事实数据', '属性覆盖', 'Inventory · 5 行', 'CSV 数据源同步', 'demo.stock', '新增列 lead_time'],
   governance: ['变更历史', 'upsert_object', 'v1.1.0', '角色视角（视图）', 'store-manager', 'Inventory 4/8'],
   marketplace: ['资产市场', '会员权益资产包', '可安装'],

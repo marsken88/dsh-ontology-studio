@@ -25,6 +25,7 @@ import { draftFromCsvFile, packageFromDraft } from './lib/datasource.mjs';
 import { nextSyncState, syncFileName, describeSync } from './lib/sync.mjs';
 import { projectPackage, viewCoverage, describeView, viewsOf, trimViewsAfterObjectDelete } from './lib/views.mjs';
 import { computeMetrics, describeResult, trimMetricsAfterObjectDelete } from './lib/metrics.mjs';
+import { planProcess, describeProcess, trimProcessesAfterObjectDelete } from './lib/process.mjs';
 import { catalogState, installAsset, uninstallAsset } from './lib/registry.mjs';
 import { generateAppSpec } from './lib/app.mjs';
 import { diffPackages, describeDiff } from './lib/diff.mjs';
@@ -38,7 +39,7 @@ import { runEvaluation, compareRuns } from './lib/evals.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Loaded code version; kept in sync with package.json by a test. */
-const CODE_VERSION = '0.57.0';
+const CODE_VERSION = '0.58.0';
 
 /** Single source of the panel's HTTP namespace. */
 const ROUTE_PREFIX = '/dsh-ontology-studio';
@@ -2364,6 +2365,87 @@ export function apply(ctx, config = {}) {
   });
 
   /* ------------------------------------------------------------------ *
+   * ontology_process_plan  (read — 推演一个业务流程现在能不能跑)
+   * ------------------------------------------------------------------ */
+  register({
+    name: 'ontology_process_plan',
+    description:
+      '在事实数据上推演资产包里声明的业务流程：按顺序走每一步——检查规则/指标是否满足、动作步骤会命中几行（在副本上真的演算，不写盘）、哪一步需要人工确认。返回每步的判定与结论，说清会不会卡住、卡在哪。这是推演不是执行：真正的执行仍走 ontology_execute_action，一步一次审批。',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageId: { type: 'string' },
+        processId: { type: 'string', description: '可选：只推演这一个流程' },
+      },
+      required: ['packageId'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          count: { type: 'number' },
+          plans: { type: 'array' },
+          summary: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      render: (_args, value) => {
+        const v = value || {};
+        if (v.ok === false) return text('未能推演：' + (v.message || '未知原因'));
+        if (!v.count) return text('这个包还没有声明业务流程。');
+        const out = [];
+        for (const plan of v.plans) {
+          out.push((plan.name || plan.id) + '（' + plan.id + '）');
+          out.push('  ' + plan.summary);
+          for (const step of plan.steps) {
+            const mark = {
+              pass: '✓',
+              'would-run': '▶',
+              manual: '⏸',
+              fail: '✗',
+              blocked: '!',
+              'no-match': '∅',
+              skipped: '-',
+            }[step.verdict] || '?';
+            out.push(`  ${mark} ${step.label}：${step.detail}`);
+          }
+        }
+        return text(out.join('\n'));
+      },
+    },
+    async execute(args) {
+      const { entry } = await store.get(args.packageId);
+      if (!entry || !entry.ir) return { ok: false, message: `资产包不存在：${args.packageId}` };
+
+      const declared = Array.isArray(entry.ir.processes) ? entry.ir.processes : [];
+      if (!declared.length) return { ok: true, count: 0, plans: [], summary: '没有声明流程' };
+      if (args.processId && !declared.some((p) => p.id === args.processId)) {
+        return {
+          ok: false,
+          message: `流程不存在：${args.processId}。已声明：${declared.map((p) => p.id).join('、')}`,
+        };
+      }
+
+      const loaded = await loadRecords(entry.file);
+      if (!loaded.records) return { ok: false, message: loaded.problems.join('；') };
+
+      const plans = declared
+        .filter((p) => !args.processId || p.id === args.processId)
+        .map((process) => planProcess(entry.ir, loaded.records, process));
+
+      return {
+        ok: true,
+        count: plans.length,
+        plans,
+        summary: plans.map((p) => p.summary).join('；'),
+      };
+    },
+  });
+
+  /* ------------------------------------------------------------------ *
    * ontology_draft_from_csv  (read — 读 CSV 推断对象草稿)
    * ------------------------------------------------------------------ */
   register({
@@ -3067,6 +3149,10 @@ export function apply(ctx, config = {}) {
       // 视图也引用对象与属性：不清理的话，级联删除会把包弄成不合法
       const trimmedViews = trimViewsAfterObjectDelete(ir, args.objectId);
       const droppedMetrics = trimMetricsAfterObjectDelete(ir, args.objectId);
+      const trimmedProcesses = trimProcessesAfterObjectDelete(ir, {
+        actions: droppedActions,
+        metrics: droppedMetrics,
+      });
 
       const check = validateIr(ir);
       if (!check.ok) {
@@ -3078,6 +3164,7 @@ export function apply(ctx, config = {}) {
         policies: trimmedPolicies.length,
         views: trimmedViews.length,
         metrics: droppedMetrics.length,
+        processes: trimmedProcesses.length,
       };
       if (args.dryRun) {
         return { ok: true, objectId: args.objectId, version: ir.version, cascaded, message: 'dryRun：未写盘' };

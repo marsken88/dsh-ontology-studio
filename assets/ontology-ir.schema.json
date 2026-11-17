@@ -108,6 +108,13 @@
       "items": {
         "$ref": "#/$defs/metric"
       }
+    },
+    "processes": {
+      "type": "array",
+      "description": "业务流程：声明一串步骤（检查 / 执行 / 人工确认），由 ontology_process_plan 在事实数据上推演。不是工作流引擎。",
+      "items": {
+        "$ref": "#/$defs/process"
+      }
     }
   },
   "$defs": {
@@ -566,6 +573,84 @@
         },
         "filter": {
           "type": "string"
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "description": "一个流程：按顺序的步骤，每步要么检查一个规则/指标，要么推演一个动作，要么挂一个需要人确认的闸口。",
+      "required": [
+        "id",
+        "name",
+        "steps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*(\\.[A-Za-z0-9]+)+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/processStep"
+          }
+        }
+      }
+    },
+    "processStep": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "check",
+            "action",
+            "gate"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "ruleId": {
+          "type": "string"
+        },
+        "metricId": {
+          "type": "string"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "actionId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "object"
+        },
+        "onFail": {
+          "enum": [
+            "stop",
+            "continue"
+          ]
         }
       }
     }

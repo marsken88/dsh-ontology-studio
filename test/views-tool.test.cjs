@@ -261,6 +261,8 @@ const EXEC = { agent: { id: 'test-agent' }, callId: 'call-1' };
     fs.mkdirSync(a4, { recursive: true });
     const seed = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'store-inventory.ir.json'), 'utf8'));
     seed.metrics = [{ id: 'inventory.probe', name: '探针', object: 'Inventory', aggregation: 'count' }];
+    // 这条用例只关心指标：随包流程引用的指标被替换掉了，先清掉流程，别让夹具自相矛盾
+    delete seed.processes;
     fs.writeFileSync(path.join(a4, 'store-inventory.ir.json'), JSON.stringify(seed, null, 2));
     mod.apply(c4, { assetsDir: a4, trace: false, history: false });
     const by = Object.fromEntries(r4.map((d) => [d.name, d]));
