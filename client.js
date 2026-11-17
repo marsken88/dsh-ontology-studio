@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
 
     /** 客户端包版本：与 package.json 同步，用于自检判断面板是否刷新过。 */
     let panelCtx = null;
-    const CLIENT_VERSION = '0.59.0';
+    const CLIENT_VERSION = '0.59.1';
 
     /**
      * POST helper for panel writes. Resolves with the response body even on 4xx,
@@ -185,7 +185,15 @@ select.os-input{padding-right:4px}
             'tr',
             null,
             p.columns.map((c) =>
-              h('th', { key: c.key, style: c.width ? { width: c.width } : undefined }, c.label)
+              h(
+                'th',
+                {
+                  key: c.key,
+                  style: Object.assign(c.width ? { width: c.width } : {}, c.onClick ? { cursor: 'pointer' } : {}),
+                  onClick: c.onClick || undefined,
+                },
+                c.label
+              )
             )
           )
         ),
@@ -3408,6 +3416,15 @@ select.os-input{padding-right:4px}
           return {
             key: c.field,
             label: c.label + (sort.field === c.field ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''),
+            onClick:
+              c.sortable === false
+                ? undefined
+                : function () {
+                    setSort(function (prev) {
+                      if (prev.field === c.field) return { field: c.field, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+                      return { field: c.field, dir: 'asc' };
+                    });
+                  },
             render: function (r) {
               const v = r[c.field];
               const shown = v === undefined || v === null || v === '' ? '—' : String(v);
@@ -3661,7 +3678,7 @@ select.os-input{padding-right:4px}
               '生成时的提示：' + spec.notes.join('；')
             )
           : null,
-        h(Notes, null, '这是由本体元数据生成的页面规格，不是可交互应用：真正渲染还需一个前端把规格转成组件。面板只展示规格，不发起任何业务操作。')
+        h(Notes, null, '上面是规格，中间那张「渲染预览」是按规格渲染出来的只读视图：筛选、排序、看详情都是真的，数据来自事实数据文件。写入与动作执行不在面板里做——那要走 Agent 的审批闸门。')
       );
     }
 
