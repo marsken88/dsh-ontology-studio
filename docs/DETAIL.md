@@ -19,6 +19,9 @@
 | 建模辅助 | `ontology_draft_object`（表结构）、`ontology_draft_from_payload`（样例报文） |
 | 产物 | `ontology_export`（JSON Schema / Markdown）、`ontology_generate_app`（页面规格） |
 | 资产市场（写） | `ontology_asset_catalog`、`ontology_install_asset`、`ontology_uninstall_asset`、`ontology_upgrade`、`ontology_diff` |
+| 数据接入 | `ontology_draft_from_csv`、`ontology_package_from_csv`、`ontology_sync_csv`、`ontology_sync_status`（后三个写盘，走审批） |
+| 治理与视角 | `ontology_upsert_view`、`ontology_delete_view`（写）、`ontology_metrics`、`ontology_lineage` |
+| 业务流程 | `ontology_process_plan`（推演，不执行） |
 | 运维 | `ontology_diagnostics`、`ontology_agents` |
 
 所有写工具都遵循同一条不变量：**先构造「写完之后」的整包再校验，不通过就什么都不写**；都支持 `dryRun` 预览。

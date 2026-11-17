@@ -37,7 +37,8 @@ for (const file of docs) {
 /* ---------- 2. 数字一致性 ---------- */
 const pkg = JSON.parse(read('package.json'));
 const indexSrc = read('index.js');
-const tools = (indexSrc.match(/name: 'ontology_[a-z_]+'/g) || []).length;
+const toolNames = (indexSrc.match(/name: 'ontology_[a-z_]+'/g) || []).map((m) => m.slice(7, -1));
+const tools = toolNames.length;
 const readOnlyTools = tools - (indexSrc.match(/registerWrite\(\{/g) || []).length;
 
 const readme = read('README.md');
@@ -113,6 +114,13 @@ if (!pkg.repository) problems.push('package.json 缺 repository 字段');
 /* ---------- 6. USAGE 与 README 的主要入口 ---------- */
 if (!readme.includes('USAGE.md')) problems.push('README 没有指向 USAGE.md');
 if (!fs.existsSync(path.join(root, '.github/workflows/test.yml'))) problems.push('缺 CI 工作流');
+
+/* ---------- 7. 插件详情页必须介绍每个工具 ---------- */
+// 详情页是市场里给人看的正文：漏了某个工具，用户就不知道它存在。
+const detailSrc = fs.readFileSync(path.join(root, 'docs/DETAIL.md'), 'utf8');
+for (const name of toolNames) {
+  if (!detailSrc.includes(name)) problems.push(`docs/DETAIL.md 没有介绍工具 ${name}`);
+}
 
 /* ---------- 输出 ---------- */
 console.log('检查文档：', docs.length, '个文件，本地链接', linkCount, '条');
